@@ -3,7 +3,9 @@
 const axios = require('axios')
 const randomstring = require('randomstring')
 const argv = require('minimist')(process.argv)
-const dutils = require('./docker-utilities')
+const jcu = require('./java-collector-utils')
+
+const env = process.env
 
 const validActions = {
   'add-delete': actionAddDelete,
@@ -16,6 +18,9 @@ let int = argv.i || 5         // interval in seconds
 let nPerInt = argv.n || 5     // number of actions executed per interval
 let maxActions = argv['max-actions'] || argv.m || Infinity
 
+// settings for the collector (only valid if java-collector)
+let remoteMode = argv['remote-mode'] || 'always'
+
 // TODO BAM extend to allow multiple --action and/or -a arguments.
 // get action to perform n times per i
 let action = argv.action || 'add-delete'
@@ -25,11 +30,24 @@ let parts = action.split('=')
 action = parts[0]
 let delay = parts[1] === undefined ? 1500 : parts[1]
 
+let badHeaders = {
+  v1: '1BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C',
+  v3: '3BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C01'
+}
+
+let badHeader = argv['bad-header'] || argv.b
+if (badHeader && !(badHeader in badHeaders)) {
+  console.log('--bad-header must be one of ' + Object.keys(badHeaders).join(', '))
+  badHeader = false
+}
+
+
+
 if (!(action in validActions)) {
   console.warn('invalid action: "%s"', action)
 }
 
-// if not good this will cause help to be displayed then process exit.
+// if not good display help then exit.
 action = validActions[action]
 
 if (!action || argv.h || argv.help) {
@@ -77,7 +95,7 @@ function formatTime(seconds) {
 let outputStats
 if (process.stdout.isTTY) {
   outputStats = function (getLine) {
-    let et = Math.floor((mstime() - startTime) / 1000)
+    let et = Math.floor((mstime() - startTime) / 1000) || 1
     let prefix = 'et: ' + formatTime(et) + ' '
     process.stdout.clearLine()
     process.stdout.cursorTo(0)
@@ -96,6 +114,9 @@ let options = {
     'X-Requested-With': 'XMLHttpRequest',
     'Content-Type': 'application/json'
   }
+}
+if (badHeader) {
+  options.headers['x-trace'] = badHeaders[badHeader]
 }
 
 function makePlainText(min = 10, max = 30) {
@@ -132,6 +153,11 @@ const wasSampled = headers => {
   if (!headers['x-trace'] || headers['x-trace'].slice(0, 2) !== '2B') {
     console.error('x-trace not valid: ' + headers['x-trace'])
     throw new Exception('x-trace not valid: ' + headers['x-trace'])
+  }
+  if (badHeader) {
+    if (options.headers['x-trace'].substr(2, 40) === headers['x-trace'].substr(2, 40)) {
+      throw new Exception('x-trace task ID same as bad header')
+    }
   }
   return headers['x-trace'].slice(-2) === '01'
 }
@@ -197,7 +223,9 @@ actionAddDelete.prototype.execute = function () {
 
   return this.addTodo(0).then(r => {
     this.addCount += 1
-    if (wasSampled(r.headers)) this.addsSampled += 1
+    if (wasSampled(r.headers)) {
+      this.addsSampled += 1
+    }
     this.output(f)
 
     // if there isn't a todo returned there isn't anything to delete
@@ -320,7 +348,21 @@ actionDelay.prototype.makeStatsLine = function (r) {
   ].join('')
 }
 
+/*
+//
+// always and never are not primitive settings.
+// always = SAMPLE_START,SAMPLE_THROUGH_ALWAYS
+// never = SAMPLE_BUCKET_ENABLED (START and THROUGH_ALWAYS are cleared)
+//
+let jcModes = {
+  always: 'SAMPLE_START,SAMPLE_THROUGH_ALWAYS,SAMPLE_BUCKET_ENABLED',
+  never: 'SAMPLE_BUCKET_ENABLED'
+}
 
+//
+// get the java-collector's configuration to document what this
+// test run was testing.
+//
 let p = dutils.getExposedPort('todo_java-collector_1', 8181).then(port => {
   let url = 'http://localhost:' + port + '/collectors'
   return axios.get(url, options).then(r => {
@@ -336,40 +378,93 @@ let p = dutils.getExposedPort('todo_java-collector_1', 8181).then(port => {
       return settings
     })
   })
-}).then(settings => console.log(settings))
-// get port for java-collector
-// 'docker inspect --format=\'{{(index (index .NetworkSettings.Ports "8181/tcp") 0).HostPort}}\' todo_java-collector_1'
-// exec(cmd, function(err, stdout, stderr) {console.log('and it is', stdout)})
+}).then(settings => {
 
-// get java-collector settings
-// localhost:32778/collectors/1/settings
+  console.log('\n', settings.flags)
+}).then(() => {
+  //
+  // display the server configuration then execute the action.
+  // execute the first time with no delay so there is immediate
+  // visual feedback.
+  //
+  return axios.get(url + '/config', options).then(r => {
+    console.log(r.data)
+  })
+}).then(() => {
+  executeAction()
+})
+// */
 
 
-
-//
-// display the server configuration then execute the action.
-// execute the first time with no delay so there is immediate
-// visual feedback.
-//
 axios.get(url + '/config', options).then(r => {
-  console.log(r.data)
+  let sampled = wasSampled(r.headers)
+  let line = 'ao: ' + (r.data.appoptics ? 'loaded' : 'not loaded')
+  line += ', aob: ' + (r.data.bindings ? 'loaded' : 'not loaded')
+  line += ', mode: ' + r.data.sampleMode + ' rate: ' + r.data.sampleRate
+  line += ', samp: ' + sampled + ', pid: ' + r.data.pid
+  line += '\nkey: ' + r.data.serviceKey
+  console.log(line)
+}).then (() => {
+  executeAction()
 })
 
+return
+
+let collector = {}
+let getSettings
+// BAM TODO don't get settings if not java-collector
+if ('it is java-collector' && false) {
+  collector = new jcu.JavaCollector('todo_java-collector_1', 8181)
+} else {
+  collector.getSettings = () => Promise.resolve({flags: '<unknown>'})
+  collector.setMode = () => Promise.resolve(true)
+}
+
+//let jc = new jcu.JavaCollector('todo_java-collector_1', 8181);
 
 
-var a = new action(url, outputStats)
-var startTime = mstime()
+collector.getSettings().then(settings => {
+  console.log('\ncollector flags:', settings.flags)
+}).then(() => {
+  //
+  // display the server configuration so it's documented
+  // at the client end. the server side scrolls on each
+  // transaction.
+  //
+  return axios.get(url + '/config', options).then(r => {
+    console.log(r.data)
+  })
+}).then(() => {
+  return collector.setMode('never')
+}).then(() => {
+  executeAction()
+})
 
-// count the number executed
-let nActions = 1
-a.executeAfter(0)
-let iid = setInterval(() => {
-  if (nActions >= maxActions) {
-    clearInterval(iid)
-    process.stdout.write('\n')
-    return
-  }
-  a.executeAfter()
-  nAction += 1
-}, interval/transactionsPerInterval)
+/*
+jc.setMode('never').then(mode => {
+  js.getSettings().then(settings => {
+    console.log('\n', settings.flags)
+  })
+})
+// */
 
+var startTime
+function executeAction () {
+  var a = new action(url, outputStats)
+  startTime = mstime()
+
+  // count the number executed
+  let nActions = 1
+  a.executeAfter(0)
+  let iid = setInterval(() => {
+    if (nActions >= maxActions) {
+      clearInterval(iid)
+      // TODO BAM this needs to wait until in-flight requests
+      // have completed.
+      process.stdout.write('\n')
+      return
+    }
+    a.executeAfter()
+    nActions += 1
+  }, interval / transactionsPerInterval)
+}
