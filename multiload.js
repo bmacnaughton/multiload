@@ -162,7 +162,7 @@ const rd = (n, p) => n.toFixed(p !== undefined ? p : 2)
 
 const wasSampled = headers => {
   // validate header present and version correct
-  if (agentConfigured === 'appoptics' && !headers['x-trace'] || headers['x-trace'].slice(0, 2) !== '2B') {
+  if (agentConfigured === 'appoptics' && (!headers['x-trace'] || headers['x-trace'].slice(0, 2) !== '2B')) {
     console.error('x-trace not valid: ' + headers['x-trace'])
     throw new Error('x-trace not valid: ' + headers['x-trace'])
   }
@@ -171,7 +171,7 @@ const wasSampled = headers => {
       throw new Error('x-trace task ID same as bad header')
     }
   }
-  return headers['x-trace'].slice(-2) === '01'
+  return headers['x-trace'] && headers['x-trace'].slice(-2) === '01'
 }
 
 
