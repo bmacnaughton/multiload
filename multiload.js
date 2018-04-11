@@ -10,7 +10,9 @@ const env = process.env
 const validActions = {
   'add-delete': actionAddDelete,
   'ad': actionAddDelete,
-  delay: actionDelay
+  delay: actionDelay,
+  chain: actionChain,
+  get: actionGet
 }
 
 // params
@@ -28,7 +30,16 @@ if (argv.a) action = argv.a
 
 let parts = action.split('=')
 action = parts[0]
-let delay = parts[1] === undefined ? 1500 : parts[1]
+
+// TODO BAM should just pass string after '=' to action.
+let delay
+let chain
+if (action === 'delay') {
+  delay = parts[1] === undefined ? 1500 : +parts[1]
+} else if (action === 'chain') {
+  // put the chain back together
+  chain = parts.slice(1).join('=')
+}
 
 let badHeaders = {
   v1: '1BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C',
@@ -57,6 +68,7 @@ if (!action || argv.h || argv.help) {
   console.log('      where action-option is:')
   console.log('        add-delete|ad - add a todo then delete it')
   console.log('        delay[=ms] server delays response for ms (1500 default)')
+  console.log('        get - get the todos')
   console.log('    -a synonym for --action')
   console.log('    -i <interval in seconds>')
   console.log('    -n <add/delete pairs per interval')
@@ -150,13 +162,13 @@ const rd = (n, p) => n.toFixed(p !== undefined ? p : 2)
 
 const wasSampled = headers => {
   // validate header present and version correct
-  if (!headers['x-trace'] || headers['x-trace'].slice(0, 2) !== '2B') {
+  if (agentConfigured === 'appoptics' && !headers['x-trace'] || headers['x-trace'].slice(0, 2) !== '2B') {
     console.error('x-trace not valid: ' + headers['x-trace'])
-    throw new Exception('x-trace not valid: ' + headers['x-trace'])
+    throw new Error('x-trace not valid: ' + headers['x-trace'])
   }
   if (badHeader) {
     if (options.headers['x-trace'].substr(2, 40) === headers['x-trace'].substr(2, 40)) {
-      throw new Exception('x-trace task ID same as bad header')
+      throw new Error('x-trace task ID same as bad header')
     }
   }
   return headers['x-trace'].slice(-2) === '01'
@@ -348,6 +360,93 @@ actionDelay.prototype.makeStatsLine = function (r) {
   ].join('')
 }
 
+//
+// class-based chain implementation
+//
+function actionChain(host, output) {
+  this.host = host
+  this.output = output
+  this.interval = interval
+  this.url = host + '/chain' + chain
+
+  this.start = mstime()
+  this.inFlight = 0
+  this.count = 0
+  this.sampled = 0
+}
+
+actionChain.prototype.execute = function () {
+  var f = (et) => this.makeStatsLine(et)
+
+  return axios.get(this.url, options).then(r => {
+    this.count += 1
+    if (wasSampled(r.headers)) {
+      this.sampled += 1
+    }
+    this.output(f)
+  })
+}
+
+actionChain.prototype.executeAfter = function (interval) {
+  if (arguments.length === 0) {
+    interval = random(this.interval)
+  }
+  return wait(interval).then(() => {
+    return this.execute().then(r => r)
+  }).catch(e => {
+    console.log('error executing add-delete', e)
+  })
+}
+
+actionChain.prototype.makeStatsLine = function (et) {
+  return [
+    'n: ', this.count, '(', rd(this.count / et), '/s), ',
+    'sampled: ', this.sampled, '(', rd(this.sampled / et), '/s) ',
+    rd(this.sampled / this.count * 100, 0), '%'
+  ].join('')
+}
+
+//
+// class-based get todos implementation
+//
+function actionGet(host, output) {
+  this.host = host
+  this.output = output
+  this.interval = interval
+  this.url = host + '/api/todos'
+
+  this.start = mstime()
+  this.getCount = 0
+}
+
+actionGet.prototype.execute = function () {
+  var start = mstime()
+  return axios.get(this.url, options).then(r => {
+    return r.data
+  })
+}
+
+actionGet.prototype.executeAfter = function (interval) {
+  if (arguments.length === 0) {
+    interval = this.interval
+  }
+  return wait(random(interval)).then(() => {
+    return this.execute().then(r => {
+      this.getCount += 1
+      var f = (et) => this.makeStatsLine(et)
+      this.output(f)
+    })
+  })
+}
+
+actionGet.prototype.makeStatsLine = function (et) {
+  return [
+    'total gets: ', this.getCount,
+    ', ', rd(this.getCount / et), '/sec'
+  ].join('')
+}
+
+
 /*
 //
 // always and never are not primitive settings.
@@ -395,17 +494,22 @@ let p = dutils.getExposedPort('todo_java-collector_1', 8181).then(port => {
 })
 // */
 
+// make it none until the response has been received
+var agentConfigured = 'dummy'
 
 axios.get(url + '/config', options).then(r => {
+  agentConfigured = r.data.configuration
   let sampled = wasSampled(r.headers)
-  let line = 'ao: ' + (r.data.appoptics ? 'loaded' : 'not loaded')
+  let line = 'agent: ' + r.data.configuration
   line += ', aob: ' + (r.data.bindings ? 'loaded' : 'not loaded')
-  line += ', mode: ' + r.data.sampleMode + ' rate: ' + r.data.sampleRate
+  line += ', mode: ' + r.data.sampleMode + ', rate: ' + r.data.sampleRate
   line += ', samp: ' + sampled + ', pid: ' + r.data.pid
   line += '\nkey: ' + r.data.serviceKey
   console.log(line)
 }).then (() => {
   executeAction()
+}).catch (e => {
+  console.log(e)
 })
 
 return
