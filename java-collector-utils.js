@@ -1,7 +1,7 @@
 'use strict'
 
 const axios = require('axios')
-const dutils = require('./docker-utilities')
+const dutils = require('./docker-utils')
 
 //
 // always and never are not primitive settings.
@@ -12,6 +12,9 @@ let jcModeMap = {
   always: 'SAMPLE_START,SAMPLE_THROUGH_ALWAYS,SAMPLE_BUCKET_ENABLED',
   never: 'SAMPLE_BUCKET_ENABLED'
 }
+jcModeMap[0] = jcModeMap.never
+jcModeMap[1] = jcModeMap.always
+
 exports.modes = Object.keys(jcModeMap)
 
 let axiosOptions = {
@@ -22,8 +25,10 @@ let axiosOptions = {
 }
 
 exports.JavaCollector = function (containerName, port) {
+  this.containerName = containerName
+  this.internalPort = port
   this.p = dutils.getExposedPort(containerName, port).then(port => {
-    this.port = port
+    this.internalPort = port
     this.baseUrl = 'http://localhost:' + port + '/collectors'
     return axios.get(this.baseUrl, axiosOptions).then(r => {
       this.collectors = r.data
