@@ -1,6 +1,6 @@
 {
   "name": "multiload",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "multiple load generating test framework",
   "main": "multiload.js",
   "scripts": {
