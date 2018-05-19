@@ -9,7 +9,10 @@ const ActionDelay = require('./action-delay')
 const ActionChain = require('./action-chain')
 const ActionGet = require('./action-get')
 const ActionAddDelete = require('./action-add-delete')
+
+// internal actions
 const ActionDelete = require('./action-delete')
+const ActionGetConfig = require('./action-get-config')
 
 const env = process.env
 
@@ -183,8 +186,6 @@ if (badHeader) {
 }
 
 // check action-specific values
-
-// TODO BAM should just pass string after '=' to action.
 if (action === ActionChain) {
   actionOptions.chain = actionArg
 } else if (action === ActionDelay) {
@@ -199,77 +200,40 @@ if (action === ActionChain) {
 // action classes
 //
 const mstime = () => new Date().getTime()
-//
-// promisify setTimeout
-// if the time is zero don't get rescheduled in the event loop
-//
-const wait = ms => ms === 0 ?
-  Promise.resolve() :
-  new Promise(resolve => setTimeout(resolve, ms))
 
 
-const rd = (n, p) => n.toFixed(p !== undefined ? p : 2)
-
-const wasSampled = headers => {
-  // validate header present and version correct
-  if (agentConfigured === 'appoptics' && (!headers['x-trace'] || headers['x-trace'].slice(0, 2) !== '2B')) {
-    console.error('x-trace not valid: ' + headers['x-trace'])
-    throw new Error('x-trace not valid: ' + headers['x-trace'])
-  }
-  if (badHeader) {
-    if (options.headers['x-trace'].substr(2, 40) === headers['x-trace'].substr(2, 40)) {
-      throw new Error('x-trace task ID same as bad header')
-    }
-  }
-  return headers['x-trace'] && headers['x-trace'].slice(-2) === '01'
-}
-
-
-let options = {
-  headers: {
-    'X-Requested-With': 'XMLHttpRequest',
-    'Content-Type': 'application/json'
-  }
-}
 //
 // Special code to delete existing todos as an option
 //
 if (argv.delete) {
-  let a = new ActionDelete(url, outputStats, options)
+  let a = new ActionDelete(url, outputStats, actionOptions)
   a.execute()
-  console.log('')
+  console.log('\n\n')
 }
 
-// make it none until the response has been received
-var agentConfigured = 'dummy'
-
-axios.get(url + '/config', options).then(r => {
-  if (r.statusCode) {
-    agentConfigured = r.data.configuration
-    actionOptions.agentConfigured = agentConfigured
-
-    let sampled = wasSampled(r.headers)
-    let line = 'agent: ' + r.data.configuration
-    line += ', aob: ' + (r.data.bindings ? 'loaded' : 'not loaded')
-    line += ', mode: ' + r.data.sampleMode + ', rate: ' + r.data.sampleRate
-    line += ', samp: ' + sampled + ', pid: ' + r.data.pid
-    line += '\nkey: ' + r.data.serviceKey
-
-    console.log(line)
-  }
-}).catch (e => {
-  console.log('error getting config', e.response.status)
+//
+// get the configuration data
+//
+let a = new ActionGetConfig(url, outputStats, actionOptions)
+a.execute().then(
+  console.log('\n\n')
+).catch (e => {
+  console.log(e)
 })
 
-// now execute the action
+//
+// now execute the action the user selected
+//
+// TODO BAM allow multiple actions, iterate through starting each.
 executeAction(actionOptions)
 
 //
 // this executes the action selected
 //
+// TODO BAM consider putting in Action base class.
 var startTime
-function executeAction(options) {
-  var a = new action(url, outputStats, options)
+function executeAction(actionOptions) {
+  var a = new action(url, outputStats, actionOptions)
   startTime = mstime()
 
   // count the number executed
@@ -278,6 +242,7 @@ function executeAction(options) {
   // more rapidly if the rate is low.
   a.execute()
 
+  // TODO BAM this should be randomized
   let iid = setInterval(() => {
     if (nActions >= maxActions) {
       clearInterval(iid)
@@ -291,94 +256,3 @@ function executeAction(options) {
     nActions += 1
   }, timerInterval)
 }
-
-return
-
-//
-// the follow are to interact with the java collector - ask it to set
-// configs, et al. various issues, so return before it.
-//
-let collector = {}
-let getSettings
-// BAM TODO don't get settings if not java-collector
-if ('it is java-collector' && false) {
-  collector = new jcu.JavaCollector('todo_java-collector_1', 8181)
-} else {
-  collector.getSettings = () => Promise.resolve({flags: '<unknown>'})
-  collector.setMode = () => Promise.resolve(true)
-}
-
-//let jc = new jcu.JavaCollector('todo_java-collector_1', 8181);
-
-
-collector.getSettings().then(settings => {
-  console.log('\ncollector flags:', settings.flags)
-}).then(() => {
-  //
-  // display the server configuration so it's documented
-  // at the client end. the server side scrolls on each
-  // transaction.
-  //
-  return axios.get(url + '/config', options).then(r => {
-    console.log(r.data)
-  })
-}).then(() => {
-  return collector.setMode('never')
-}).then(() => {
-  executeAction(actionOptions)
-})
-
-/*
-jc.setMode('never').then(mode => {
-  js.getSettings().then(settings => {
-    console.log('\n', settings.flags)
-  })
-})
-// */
-
-/*
-//
-// always and never are not primitive settings.
-// always = SAMPLE_START,SAMPLE_THROUGH_ALWAYS
-// never = SAMPLE_BUCKET_ENABLED (START and THROUGH_ALWAYS are cleared)
-//
-let jcModes = {
-  always: 'SAMPLE_START,SAMPLE_THROUGH_ALWAYS,SAMPLE_BUCKET_ENABLED',
-  never: 'SAMPLE_BUCKET_ENABLED'
-}
-
-//
-// get the java-collector's configuration to document what this
-// test run was testing.
-//
-let p = dutils.getExposedPort('todo_java-collector_1', 8181).then(port => {
-  let url = 'http://localhost:' + port + '/collectors'
-  return axios.get(url, options).then(r => {
-    let collectorIds = Object.keys(r.data)
-    if (Object.keys(r.data).length !== 1) {
-      throw new Error('There is not exactly one collector')
-    }
-    return collectorIds[0]
-  }).then(id => {
-    let url = 'http://localhost:' + port + '/collectors/' + id + '/settings'
-    return axios.get(url, options).then(r => {
-      let settings = r.data[0]
-      return settings
-    })
-  })
-}).then(settings => {
-
-  console.log('\n', settings.flags)
-}).then(() => {
-  //
-  // display the server configuration then execute the action.
-  // execute the first time with no delay so there is immediate
-  // visual feedback.
-  //
-  return axios.get(url + '/config', options).then(r => {
-    console.log(r.data)
-  })
-}).then(() => {
-  executeAction()
-})
-// */
