@@ -1,44 +1,90 @@
 'use strict'
 
 const axios = require('axios')
-const randomstring = require('randomstring')
-const argv = require('minimist')(process.argv)
+const minimist = require('minimist')
 const jcu = require('./java-collector-utils')
+
+// actions
+const ActionDelay = require('./action-delay')
+const ActionChain = require('./action-chain')
+const ActionGet = require('./action-get')
+const ActionAddDelete = require('./action-add-delete')
 
 const env = process.env
 
 const validActions = {
-  'add-delete': actionAddDelete,
-  'ad': actionAddDelete,
-  delay: actionDelay,
-  chain: actionChain,
-  get: actionGet
+  'add-delete': ActionAddDelete,
+  'ad': ActionAddDelete,
+  delay: ActionDelay,
+  chain: ActionChain,
+  get: ActionGet
 }
 
+const cliOptions = [{
+  name: 'ws-ip',
+  alias: 'w',
+  description: 'webserver[:port] to connect to',
+  default: 'http://localhost:8088'
+}, {
+  name: 'action',
+  alias: 'a',
+  description: 'action to perform (default: add-delete)',
+  default: 'add-delete'
+}, {
+  name: 'max-actions',
+  alias: 'm',
+  description: 'maximum number of each action to perform',
+  default: Infinity
+}, {
+  name: 'rate',
+  alias: 'r',
+  description: 'number of actions to execute per second',
+  default: 1,
+}, {
+  name: 'bad-header',
+  alias: 'b',
+  description: 'bad header to use, either v1 or v3',
+}, {
+  name: 'remote-mode',
+  description: 'java-collector only setting for remote mode',
+  default: 'always'
+}, {
+  name: 'help',
+  alias: 'h',
+  description: 'this message or --help action for help on that action',
+}]
+
+// create a map from an array of objects using key as the prop name
+// and val
+function makeMap(array, key, val) {
+  const r = {}
+  array.forEach(item => {
+    r[item[key]] = item[val]
+  })
+  return r
+}
+
+const argv = minimist(process.argv.slice(2), {
+  default: makeMap(cliOptions, 'name', 'default'),
+  alias: makeMap(cliOptions, 'alias', 'name'),
+  boolean: cliOptions.filter(i => i.boolean)
+})
+
 // params
-let int = argv.i || 5         // interval in seconds
-let nPerInt = argv.n || 5     // number of actions executed per interval
-let maxActions = argv['max-actions'] || argv.m || Infinity
+let rate = argv.rate
+let maxActions = argv['max-actions']
 
-// settings for the collector (only valid if java-collector)
-let remoteMode = argv['remote-mode'] || 'always'
+let remoteMode = argv['remote-mode']
 
-// TODO BAM extend to allow multiple --action and/or -a arguments.
-// get action to perform n times per i
-let action = argv.action || 'add-delete'
-if (argv.a) action = argv.a
+let action = argv.action
+// TODO allow multiple action to be specified
+//if (!Array.isArray(action)) action = [action]
 
-let parts = action.split('=')
-action = parts[0]
-
-// TODO BAM should just pass string after '=' to action.
-let delay
-let chain
-if (action === 'delay') {
-  delay = parts[1] === undefined ? 1500 : +parts[1]
-} else if (action === 'chain') {
-  // put the chain back together
-  chain = parts.slice(1).join('=')
+let index = action.indexOf('=')
+let actionArg
+if (~index) {
+  actionArg = action.slice(index + 1)
+  action = action.slice(0, index)
 }
 
 let badHeaders = {
@@ -70,7 +116,7 @@ if (!action || argv.h || argv.help) {
   console.log('        delay[=ms] server delays response for ms (1500 default)')
   console.log('        get - get the todos')
   console.log('    -a synonym for --action')
-  console.log('    -i <interval in seconds>')
+  console.log('    --rate, -r - number of actions per second (default 1)')
   console.log('    -n <add/delete pairs per interval')
   console.log('    --ws_ip=host[:port] todo server to connect to')
   console.log('    --delete delete existing todos before starting')
@@ -82,16 +128,12 @@ if (!action || argv.h || argv.help) {
 
 
 //
-// new timer-based distribution of transactions
+// timer-based distribution of transactions
 //
-let interval = (argv.i || 10) * 1000
-let transactionsPerInterval = argv.n || 1
-let timerInterval =  interval / transactionsPerInterval * 1000
+let timerInterval =  1 / rate * 1000
 
-let url = 'http://localhost:8088'
-if (argv.ws_ip) {
-  url = 'http://' + argv.ws_ip
-}
+let url = argv['ws-ip']
+if (url.indexOf('http://') !== 0) url = 'http://' + url
 
 function formatTime(seconds) {
   const h = Math.floor(seconds / 3600);
@@ -127,13 +169,31 @@ let options = {
     'Content-Type': 'application/json'
   }
 }
-if (badHeader) {
-  options.headers['x-trace'] = badHeaders[badHeader]
+// replace previous options as actions move to separate files.
+let actionOptions = {
+  httpOptions: {
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'Content-Type': 'application/json'
+    }
+  },
+  rate: rate,
 }
 
-function makePlainText(min = 10, max = 30) {
-  let length = min + Math.random() * (max - min)
-  return randomstring.generate(length)
+if (badHeader) {
+  options.headers['x-trace'] = badHeaders[badHeader]
+  actionOptions.httpOptions.headers['x-trace'] = badHeaders[badHeader]
+  actionOptions.badHeader = badHeaders[badHeader]
+}
+
+// check action-specific values
+
+// TODO BAM should just pass string after '=' to action.
+if (action === ActionChain) {
+  actionOptions.chain = actionArg
+} else if (action === ActionDelay) {
+  actionArg = +actionArg || 1500
+  actionOptions.delay = actionArg >= 1 ? actionArg : 1500
 }
 
 //
@@ -151,12 +211,6 @@ const wait = ms => ms === 0 ?
   Promise.resolve() :
   new Promise(resolve => setTimeout(resolve, ms))
 
-//
-// get a time in the interval. it will average 1/2 of the interval time.
-//
-function random (interval) {
-  return Math.round(Math.random() * interval, 0)
-}
 
 const rd = (n, p) => n.toFixed(p !== undefined ? p : 2)
 
@@ -213,239 +267,101 @@ if (argv.delete) {
   })
 }
 
+// make it none until the response has been received
+var agentConfigured = 'dummy'
+
+axios.get(url + '/config', options).then(r => {
+  if (r.statusCode) {
+    agentConfigured = r.data.configuration
+    actionOptions.agentConfigured = agentConfigured
+
+    let sampled = wasSampled(r.headers)
+    let line = 'agent: ' + r.data.configuration
+    line += ', aob: ' + (r.data.bindings ? 'loaded' : 'not loaded')
+    line += ', mode: ' + r.data.sampleMode + ', rate: ' + r.data.sampleRate
+    line += ', samp: ' + sampled + ', pid: ' + r.data.pid
+    line += '\nkey: ' + r.data.serviceKey
+
+    console.log(line)
+  }
+}).catch (e => {
+  console.log('error getting config', e.response.status)
+})
+
+// now execute the action
+executeAction(actionOptions)
+
 //
-// class-based add-delete implementation
+// this executes the action selected
 //
-function actionAddDelete (host, output) {
-  this.host = host
-  this.output = output
-  this.interval = interval
-  this.url = host + '/api/todos'
+var startTime
+function executeAction(options) {
+  var a = new action(url, outputStats, options)
+  startTime = mstime()
 
-  this.start = mstime()
-  this.inFlight = 0
-  this.addCount = 0
-  this.addsSampled = 0
-  this.delCount = 0
-  this.delsSampled = 0
-}
+  // count the number executed
+  let nActions = 1
+  // execute the first one immediately so errors are detected
+  // more rapidly if the rate is low.
+  a.execute()
 
-actionAddDelete.prototype.execute = function () {
-  var f = (et) => this.makeStatsLine(et)
-
-  return this.addTodo(0).then(r => {
-    this.addCount += 1
-    if (wasSampled(r.headers)) {
-      this.addsSampled += 1
+  let iid = setInterval(() => {
+    if (nActions >= maxActions) {
+      clearInterval(iid)
+      // TODO BAM this needs to wait until in-flight requests
+      // have completed.
+      process.stdout.write('\n')
+      return
     }
-    this.output(f)
 
-    // if there isn't a todo returned there isn't anything to delete
-    if (!(r.data && r.data.todo)) {
-      return Promise.reject('transaction failed')
-    }
-
-    return wait(random(this.interval)).then(() => {
-      this.deleteTodo(r.data.todo).then(r => {
-        this.delCount += 1
-        if (wasSampled(r.headers)) this.delsSampled += 1
-        this.output(f)
-        return r
-      })
-    })
-  })
+    a.execute()
+    nActions += 1
+  }, timerInterval)
 }
 
-actionAddDelete.prototype.executeAfter = function (interval) {
-  if (arguments.length === 0) {
-    interval = random(this.interval)
-  }
-  return wait(interval).then(() => {
-    return this.execute().then(r => r)
-  }).catch (e => {
-    console.log('error executing add-delete', e)
-  })
-}
-
-// add a random todo
-actionAddDelete.prototype.addTodo = function () {
-  let start = mstime()
-  let ipso = makePlainText()
-  let req = { title: ipso, completed: false }
-  this.inFlight += 1
-  return axios.post(this.url, req, options).then(r => {
-    this.inFlight -= 1
-    // accumulate time
-    this.addTime += mstime() - start
-    return r
-  }).catch(e => {
-    console.log(e)
-    this.inFlight -= 1
-    return {}
-  })
-}
-
-// delete a specific ID
-actionAddDelete.prototype.deleteTodo = function (todo) {
-  let start = mstime()
-  this.inFlight += 1
-  return axios.delete(this.url + '/' + todo._id, options).then(r => {
-    this.inFlight -= 1
-    this.delTime += mstime() - start
-    return r
-  }).catch(e => {
-    console.log(e)
-    this.inFlight -= 1
-    return {}
-  })
-}
-
-actionAddDelete.prototype.makeStatsLine = function (et) {
-  var totActions = this.addCount + this.delCount
-  var totSampled = this.addsSampled + this.delsSampled
-  return [
-    'a:', this.addCount, '(', rd(this.addCount / et), '/s), ',
-    'd:', this.delCount, '(', rd(this.delCount / et), '/s), ',
-    'sampled a:', this.addsSampled, ', d:', this.delsSampled,
-    ', t:', totSampled, ' (', rd(totSampled/totActions*100, 0), '%)'
-  ].join('')
-}
-
+return
 
 //
-// class-based delay implementation
+// the follow are to interact with the java collector - ask it to set
+// configs, et al. various issues, so return before it.
 //
-function actionDelay (host, output) {
-  this.host = host
-  this.output = output
-  this.interval = interval
-  this.delay = delay
-  this.url = host + '/delay/' + delay
-
-  this.start = mstime()
-  this.delayCalls = 0
-  this.totalServerDelay = 0
-  this.totalDelay = 0
+let collector = {}
+let getSettings
+// BAM TODO don't get settings if not java-collector
+if ('it is java-collector' && false) {
+  collector = new jcu.JavaCollector('todo_java-collector_1', 8181)
+} else {
+  collector.getSettings = () => Promise.resolve({flags: '<unknown>'})
+  collector.setMode = () => Promise.resolve(true)
 }
 
-actionDelay.prototype.execute = function () {
-  var start = mstime()
-  return axios.get(this.url, options).then(r => {
-    return {serverDelay: r.data.actualDelay, totalDelay: mstime() - start}
+//let jc = new jcu.JavaCollector('todo_java-collector_1', 8181);
+
+
+collector.getSettings().then(settings => {
+  console.log('\ncollector flags:', settings.flags)
+}).then(() => {
+  //
+  // display the server configuration so it's documented
+  // at the client end. the server side scrolls on each
+  // transaction.
+  //
+  return axios.get(url + '/config', options).then(r => {
+    console.log(r.data)
   })
-}
+}).then(() => {
+  return collector.setMode('never')
+}).then(() => {
+  executeAction(actionOptions)
+})
 
-actionDelay.prototype.executeAfter = function (interval) {
-  if (arguments.length === 0) {
-    interval = this.interval
-  }
-  return wait(random(interval)).then(() => {
-    return this.execute().then(r => {
-      this.delayCalls += 1
-      this.totalServerDelay += r.serverDelay
-      this.totalDelay += r.totalDelay
-      var f = (et) => this.makeStatsLine(r)
-      this.output(f)
-    })
+/*
+jc.setMode('never').then(mode => {
+  js.getSettings().then(settings => {
+    console.log('\n', settings.flags)
   })
-}
-
-actionDelay.prototype.makeStatsLine = function (r) {
-  return [
-    'n: ', this.delayCalls,
-    ', delay (tot, server) avg (',
-    rd(this.totalDelay / this.delayCalls), ', ',
-    rd(this.totalServerDelay / this.delayCalls),
-    ') last (', r.totalDelay, ', ', r.serverDelay, ')'
-  ].join('')
-}
-
-//
-// class-based chain implementation
-//
-function actionChain(host, output) {
-  this.host = host
-  this.output = output
-  this.interval = interval
-  this.url = host + '/chain' + chain
-
-  this.start = mstime()
-  this.inFlight = 0
-  this.count = 0
-  this.sampled = 0
-}
-
-actionChain.prototype.execute = function () {
-  var f = (et) => this.makeStatsLine(et)
-
-  return axios.get(this.url, options).then(r => {
-    this.count += 1
-    if (wasSampled(r.headers)) {
-      this.sampled += 1
-    }
-    this.output(f)
-  })
-}
-
-actionChain.prototype.executeAfter = function (interval) {
-  if (arguments.length === 0) {
-    interval = random(this.interval)
-  }
-  return wait(interval).then(() => {
-    return this.execute().then(r => r)
-  }).catch(e => {
-    console.log('error executing add-delete', e)
-  })
-}
-
-actionChain.prototype.makeStatsLine = function (et) {
-  return [
-    'n: ', this.count, '(', rd(this.count / et), '/s), ',
-    'sampled: ', this.sampled, '(', rd(this.sampled / et), '/s) ',
-    rd(this.sampled / this.count * 100, 0), '%'
-  ].join('')
-}
-
-//
-// class-based get todos implementation
-//
-function actionGet(host, output) {
-  this.host = host
-  this.output = output
-  this.interval = interval
-  this.url = host + '/api/todos'
-
-  this.start = mstime()
-  this.getCount = 0
-}
-
-actionGet.prototype.execute = function () {
-  var start = mstime()
-  return axios.get(this.url, options).then(r => {
-    return r.data
-  })
-}
-
-actionGet.prototype.executeAfter = function (interval) {
-  if (arguments.length === 0) {
-    interval = this.interval
-  }
-  return wait(random(interval)).then(() => {
-    return this.execute().then(r => {
-      this.getCount += 1
-      var f = (et) => this.makeStatsLine(et)
-      this.output(f)
-    })
-  })
-}
-
-actionGet.prototype.makeStatsLine = function (et) {
-  return [
-    'total gets: ', this.getCount,
-    ', ', rd(this.getCount / et), '/sec'
-  ].join('')
-}
-
+})
+// */
 
 /*
 //
@@ -493,82 +409,3 @@ let p = dutils.getExposedPort('todo_java-collector_1', 8181).then(port => {
   executeAction()
 })
 // */
-
-// make it none until the response has been received
-var agentConfigured = 'dummy'
-
-axios.get(url + '/config', options).then(r => {
-  agentConfigured = r.data.configuration
-  let sampled = wasSampled(r.headers)
-  let line = 'agent: ' + r.data.configuration
-  line += ', aob: ' + (r.data.bindings ? 'loaded' : 'not loaded')
-  line += ', mode: ' + r.data.sampleMode + ', rate: ' + r.data.sampleRate
-  line += ', samp: ' + sampled + ', pid: ' + r.data.pid
-  line += '\nkey: ' + r.data.serviceKey
-  console.log(line)
-}).then (() => {
-  executeAction()
-}).catch (e => {
-  console.log(e)
-})
-
-return
-
-let collector = {}
-let getSettings
-// BAM TODO don't get settings if not java-collector
-if ('it is java-collector' && false) {
-  collector = new jcu.JavaCollector('todo_java-collector_1', 8181)
-} else {
-  collector.getSettings = () => Promise.resolve({flags: '<unknown>'})
-  collector.setMode = () => Promise.resolve(true)
-}
-
-//let jc = new jcu.JavaCollector('todo_java-collector_1', 8181);
-
-
-collector.getSettings().then(settings => {
-  console.log('\ncollector flags:', settings.flags)
-}).then(() => {
-  //
-  // display the server configuration so it's documented
-  // at the client end. the server side scrolls on each
-  // transaction.
-  //
-  return axios.get(url + '/config', options).then(r => {
-    console.log(r.data)
-  })
-}).then(() => {
-  return collector.setMode('never')
-}).then(() => {
-  executeAction()
-})
-
-/*
-jc.setMode('never').then(mode => {
-  js.getSettings().then(settings => {
-    console.log('\n', settings.flags)
-  })
-})
-// */
-
-var startTime
-function executeAction () {
-  var a = new action(url, outputStats)
-  startTime = mstime()
-
-  // count the number executed
-  let nActions = 1
-  a.executeAfter(0)
-  let iid = setInterval(() => {
-    if (nActions >= maxActions) {
-      clearInterval(iid)
-      // TODO BAM this needs to wait until in-flight requests
-      // have completed.
-      process.stdout.write('\n')
-      return
-    }
-    a.executeAfter()
-    nActions += 1
-  }, interval / transactionsPerInterval)
-}
