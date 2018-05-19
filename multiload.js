@@ -9,6 +9,7 @@ const ActionDelay = require('./action-delay')
 const ActionChain = require('./action-chain')
 const ActionGet = require('./action-get')
 const ActionAddDelete = require('./action-add-delete')
+const ActionDelete = require('./action-delete')
 
 const env = process.env
 
@@ -72,13 +73,17 @@ const argv = minimist(process.argv.slice(2), {
 
 // params
 let rate = argv.rate
-let maxActions = argv['max-actions']
 
 let remoteMode = argv['remote-mode']
 
 let action = argv.action
+let maxActions = argv['max-actions']
 // TODO allow multiple action to be specified
 //if (!Array.isArray(action)) action = [action]
+
+
+let url = argv['ws-ip']
+if (url.indexOf('http://') !== 0) url = 'http://' + url
 
 let index = action.indexOf('=')
 let actionArg
@@ -92,13 +97,11 @@ let badHeaders = {
   v3: '3BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C01'
 }
 
-let badHeader = argv['bad-header'] || argv.b
+let badHeader = argv['bad-header']
 if (badHeader && !(badHeader in badHeaders)) {
   console.log('--bad-header must be one of ' + Object.keys(badHeaders).join(', '))
   badHeader = false
 }
-
-
 
 if (!(action in validActions)) {
   console.warn('invalid action: "%s"', action)
@@ -108,18 +111,20 @@ if (!(action in validActions)) {
 action = validActions[action]
 
 if (!action || argv.h || argv.help) {
-  console.log('usage: node multitest.js')
+  console.log('usage: node multitest.js options')
   console.log('  options:')
-  console.log('    --action=action-option')
-  console.log('      where action-option is:')
+  console.log('    -a action, --action=action (default: add-delete)')
+  console.log('      where action is:')
   console.log('        add-delete|ad - add a todo then delete it')
   console.log('        delay[=ms] server delays response for ms (1500 default)')
   console.log('        get - get the todos')
-  console.log('    -a synonym for --action')
-  console.log('    --rate, -r - number of actions per second (default 1)')
-  console.log('    -n <add/delete pairs per interval')
-  console.log('    --ws_ip=host[:port] todo server to connect to')
-  console.log('    --delete delete existing todos before starting')
+  console.log('        chain[=?query-chain] - chain requests as specified')
+  console.log('')
+  console.log('    -r n, --rate=n - number of actions per second (default 1)')
+  console.log('    -m n, --max-actions=n - stop after this many actions')
+  console.log('    --ws-ip=host[:port] - todo server to connect to')
+  console.log('    --delete - delete existing todos before starting')
+  console.log('    -b, --bad-header - v1 or v3, sends bad header instead of good')
   console.log()
   process.exit(0)
 }
@@ -131,9 +136,6 @@ if (!action || argv.h || argv.help) {
 // timer-based distribution of transactions
 //
 let timerInterval =  1 / rate * 1000
-
-let url = argv['ws-ip']
-if (url.indexOf('http://') !== 0) url = 'http://' + url
 
 function formatTime(seconds) {
   const h = Math.floor(seconds / 3600);
@@ -163,12 +165,6 @@ if (process.stdout.isTTY) {
   }
 }
 
-let options = {
-  headers: {
-    'X-Requested-With': 'XMLHttpRequest',
-    'Content-Type': 'application/json'
-  }
-}
 // replace previous options as actions move to separate files.
 let actionOptions = {
   httpOptions: {
@@ -229,42 +225,19 @@ const wasSampled = headers => {
 }
 
 
+let options = {
+  headers: {
+    'X-Requested-With': 'XMLHttpRequest',
+    'Content-Type': 'application/json'
+  }
+}
 //
 // Special code to delete existing todos as an option
 //
 if (argv.delete) {
-  let executeGet = function (interval) {
-    return wait(interval).then(() => {
-      return axios.get(url + '/api/todos', options).then(r => r)
-    })
-  }
-
-  let ad = new actionAddDelete(url, 0)
-
-  let outstanding = []
-  executeGet(0).then(r => {
-    let todosToDelete = r.data
-    while(todosToDelete.length) {
-      console.log('todos to delete: ', todosToDelete.length)
-      let todo = todosToDelete.shift()
-      // small delay so not all requests are queued before yielding
-      // to the event loop.
-      let p = wait(100).then(() => ad.deleteTodo(todo)).then(() => {
-        return 1
-      }).catch(e => {
-        console.log(e)
-        return 0
-      })
-      outstanding.push(p)
-    }
-    return 'queued'
-  }).then(() => {
-    Promise.all(outstanding).then(values => {
-      if (values.length) {
-        console.log('deleted todos:', values.reduce((acc, val) => acc + val))
-      }
-    })
-  })
+  let a = new ActionDelete(url, outputStats, options)
+  a.execute()
+  console.log('')
 }
 
 // make it none until the response has been received
