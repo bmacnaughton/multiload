@@ -10,9 +10,32 @@ class Action {
     this.badHeader = options.badHeader
     this.getDelay = options.delayFn || this.delay
 
+    this.gets = 0
+    this.posts = 0
+    this.deletes = 0
+
     // keep track of how many requests have not received
     // a response.
     this.inFlight = 0
+
+    // check sample status if intended
+    this.checkedTot = 0
+    this.checkedSampled = 0
+    // presume true as most common usage.
+    this.checkSamples = true
+    if ('checkSamples' in options) {
+      this.checkSamples = options.checkSamples
+    }
+  }
+
+  _common (r) {
+    debugger
+    if (this.checkSamples) {
+      this.checkedTot += 1
+      if (this.wasSampled(r.headers)) {
+        this.checkedSampled += 1
+      }
+    }
   }
 
   httpGet (url, options) {
@@ -20,7 +43,11 @@ class Action {
       options = this.httpOptions
     }
     this.inFlight += 1
-    return axios.get(url, this.httpOptions).finally(() => {
+    this.gets += 1
+    return axios.get(url, this.httpOptions).then(r => {
+      this._common(r)
+      return r
+    }).finally(() => {
       this.inFlight -= 1
     })
   }
@@ -30,7 +57,11 @@ class Action {
       options = this.httpOptions
     }
     this.inFlight += 1
-    return axios.post(url, req, options).finally(() => {
+    this.posts += 1
+    return axios.post(url, req, options).then(r => {
+      this._common(r)
+      return r
+    }).finally(() => {
       this.inFlight -= 1
     })
   }
@@ -40,7 +71,11 @@ class Action {
       options = this.httpOptions
     }
     this.inFlight += 1
-    return axios.delete(url, options).finally(() => {
+    this.deletes += 1
+    return axios.delete(url, options).then(r => {
+      this._common(r)
+      return r
+    }).finally(() => {
       this.inFlight -= 1
     })
   }

@@ -29,16 +29,12 @@ class ActionGetConfig extends Action {
     this.agent = r.data.configuration
     config.agent = this.agent
 
-    config.sampled = this.wasSampled(r.headers)
     config.bindings = r.data.bindings ? 'loaded' : 'not loaded'
     config.sampleMode = r.data.sampleMode
     config.sampleRate = r.data.sampleRate
     config.pid = r.data.pid
     config.key = r.data.serviceKey
     this.count += 1
-    if (config.sampled) {
-      this.sampled += 1
-    }
     return config
   }
 
@@ -49,9 +45,8 @@ class ActionGetConfig extends Action {
       ', bindings: ', config.bindings,
       ', mode: ', config.sampleMode,
       ', rate: ', config.sampleRate,
-      '\nsamp: ', config.sampled,
-      ', pid: ', config.pid,
-      '\nservice name: ', config.key.split(':')[1],
+      '\npid: ', config.pid,
+      ', service name: ', config.key.split(':')[1],
       '\n===================\n'
     ].join('')
 
