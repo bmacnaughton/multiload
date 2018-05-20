@@ -14,6 +14,13 @@ const ActionAddDelete = require('./action-add-delete')
 const ActionDelete = require('./action-delete')
 const ActionGetConfig = require('./action-get-config')
 
+if (!Promise.prototype.finally) {
+  console.log('[error] multiload requires Promise.prototype.finally')
+  console.log('        run node v8 with "--harmony-promise-finally"')
+  console.log('        or node v10')
+  process.exit(1)
+}
+
 const env = process.env
 
 const validActions = {
@@ -168,7 +175,9 @@ if (process.stdout.isTTY) {
   }
 }
 
-// replace previous options as actions move to separate files.
+//
+// build options to be passed to action
+//
 let actionOptions = {
   httpOptions: {
     headers: {
@@ -180,7 +189,6 @@ let actionOptions = {
 }
 
 if (badHeader) {
-  options.headers['x-trace'] = badHeaders[badHeader]
   actionOptions.httpOptions.headers['x-trace'] = badHeaders[badHeader]
   actionOptions.badHeader = badHeaders[badHeader]
 }
@@ -233,15 +241,47 @@ executeAction(actionOptions)
 // TODO BAM consider putting in Action base class.
 var startTime
 function executeAction(actionOptions) {
-  var a = new action(url, outputStats, actionOptions)
+  let a = new action(url, outputStats, actionOptions)
   startTime = mstime()
 
   // count the number executed
   let nActions = 1
-  // execute the first one immediately so errors are detected
-  // more rapidly if the rate is low.
+  // execute the first one immediately for visual feedback
+  // (important if the rate is low.)
   a.execute()
 
+  let loop = () => {
+    if (nActions > maxActions) {
+      // TODO BAM needs to wait while in-flight requests
+      // have completed.
+      return
+    }
+    let wait = delay()
+    setTimeout(function () {
+      a.execute().then(r => {
+        nActions += 1
+      })
+      // set new timer
+      loop()
+    }, wait)
+  }
+
+  loop()
+  /*
+  (function loop () {
+    if (nActions > maxActions) {
+      // TODO BAM needs to wait while in-flight requests
+      // have completed.
+      return
+    }
+    setTimeout(function () {
+      a.execute()
+      nActions += 1
+    }, delay())
+  })()
+  // */
+
+  /*
   // TODO BAM this should be randomized
   let iid = setInterval(() => {
     if (nActions >= maxActions) {
@@ -255,4 +295,12 @@ function executeAction(actionOptions) {
     a.execute()
     nActions += 1
   }, timerInterval)
+  // */
+}
+
+function delay () {
+  // rate is actions/second => 1/rate is seconds/action
+  // seconds/action * 1000 => ms/action
+  // ms/action * 2 => yields average action/second ≈≈ rate
+  return Math.random() * 1 / rate * 2000
 }
