@@ -267,35 +267,6 @@ function executeAction(actionOptions) {
   }
 
   loop()
-  /*
-  (function loop () {
-    if (nActions > maxActions) {
-      // TODO BAM needs to wait while in-flight requests
-      // have completed.
-      return
-    }
-    setTimeout(function () {
-      a.execute()
-      nActions += 1
-    }, delay())
-  })()
-  // */
-
-  /*
-  // TODO BAM this should be randomized
-  let iid = setInterval(() => {
-    if (nActions >= maxActions) {
-      clearInterval(iid)
-      // TODO BAM this needs to wait until in-flight requests
-      // have completed.
-      process.stdout.write('\n')
-      return
-    }
-
-    a.execute()
-    nActions += 1
-  }, timerInterval)
-  // */
 }
 
 function delay () {
