@@ -19,7 +19,7 @@ class Action {
     this.inFlight = 0
 
     // check sample status if intended
-    this.checkedTot = 0
+    this.checkedTotal = 0
     this.checkedSampled = 0
     // presume true as most common usage.
     this.checkSamples = true
@@ -29,9 +29,8 @@ class Action {
   }
 
   _common (r) {
-    debugger
     if (this.checkSamples) {
-      this.checkedTot += 1
+      this.checkedTotal += 1
       if (this.wasSampled(r.headers)) {
         this.checkedSampled += 1
       }

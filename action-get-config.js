@@ -40,14 +40,12 @@ class ActionGetConfig extends Action {
 
   makeStatsLine (et, config) {
     return [
-      '\n===================\n',
       'agent: ', config.agent,
       ', bindings: ', config.bindings,
       ', mode: ', config.sampleMode,
       ', rate: ', config.sampleRate,
-      '\npid: ', config.pid,
-      ', service name: ', config.key.split(':')[1],
-      '\n===================\n'
+      '\nservice name: ', config.key.split(':')[1],
+      ', pid: ', config.pid,
     ].join('')
 
     return [

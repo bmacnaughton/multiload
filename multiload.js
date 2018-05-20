@@ -2,6 +2,9 @@
 
 const axios = require('axios')
 const minimist = require('minimist')
+const readline = require('readline')
+
+
 const jcu = require('./java-collector-utils')
 
 // actions
@@ -140,13 +143,6 @@ if (!action || argv.h || argv.help) {
 }
 
 
-
-
-//
-// timer-based distribution of transactions
-//
-let timerInterval =  1 / rate * 1000
-
 function formatTime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -158,14 +154,30 @@ function formatTime(seconds) {
   ].filter(a => a).join(':');
 }
 
+function newlineCount (string) {
+  let count = 0
+  let lastIndex = -1
+
+  while (~(lastIndex = string.indexOf('\n', lastIndex + 1))) {
+    count += 1
+  }
+  return count
+}
+
+let configX = 0
+let totalX = 4
+let actionX = 5
+
 let outputStats
+let statsLines
 if (process.stdout.isTTY) {
   outputStats = function (getLine) {
     let et = Math.floor((mstime() - startTime) / 1000) || 1
-    let prefix = 'et: ' + formatTime(et) + ' '
-    process.stdout.clearLine()
-    process.stdout.cursorTo(0)
-    process.stdout.write(prefix + getLine(et))
+    readline.cursorTo(process.stdout, 0, actionX)
+
+    let line = getLine(et)
+    process.stdout.write(line)
+    readline.clearLine(process.stdout, 1)
   }
 } else {
   outputStats = function (getLine) {
@@ -173,6 +185,25 @@ if (process.stdout.isTTY) {
     let prefix = 'et: ' + formatTime(et) + ' '
     process.stdout.write(prefix + getLine(et) + '\n')
   }
+}
+let outputConfig = function (getLine) {
+  let et = (mstime() - startTime) / 1000
+  process.stdout.write(  '===================\n')
+  let line = getLine(et)
+  process.stdout.write(line)
+  process.stdout.write('\n===================\n')
+}
+
+let actionLine
+let outputTotals = function (total, sampled) {
+  readline.cursorTo(process.stdout, 0, totalX)
+  let et = Math.floor((mstime() - startTime) / 1000) || 1
+  let line = [
+    'et: ', formatTime(et),
+    ', total: ', total, ', sampled: ', sampled,
+    '\n'
+  ].join('')
+  process.stdout.write(line)
 }
 
 //
@@ -209,34 +240,46 @@ if (action === ActionChain) {
 //
 const mstime = () => new Date().getTime()
 
-
+let p
 //
 // Special code to delete existing todos as an option
 //
 if (argv.delete) {
   let a = new ActionDelete(url, outputStats, actionOptions)
-  a.execute()
-  console.log('\n\n')
+  p = a.execute().then(r => {
+
+  }).catch(e => {
+    console.log(e)
+  })
+} else {
+  p = Promise.resolve()
 }
 
 //
 // get the configuration data
 //
-let a = new ActionGetConfig(url, outputStats, actionOptions)
-a.execute().then(
-  console.log('\n\n')
-).catch (e => {
-  console.log(e)
+p.then(() => {
+  readline.cursorTo(process.stdout, 0, 0)
+  readline.clearScreenDown(process.stdout)
+  let a = new ActionGetConfig(url, outputConfig, actionOptions)
+  return a.execute().then(r => {
+
+  }).catch(e => {
+    console.log(e)
+  })
+}).then(() => {
+  //
+  // now execute the action the user selected
+  //
+  // TODO BAM allow multiple actions, iterate through starting each.
+  executeAction(actionOptions)
 })
 
-//
-// now execute the action the user selected
-//
-// TODO BAM allow multiple actions, iterate through starting each.
-executeAction(actionOptions)
+
+
 
 //
-// this executes the action selected
+// this repeatedly executes the action selected
 //
 // TODO BAM consider putting in Action base class.
 var startTime
@@ -244,11 +287,17 @@ function executeAction(actionOptions) {
   let a = new action(url, outputStats, actionOptions)
   startTime = mstime()
 
+  outputTotals(a.checkedTotal, a.checkedSampled)
+
+  debugger
+
   // count the number executed
   let nActions = 1
   // execute the first one immediately for visual feedback
   // (important if the rate is low.)
-  a.execute()
+  a.execute().then(r => {
+    outputTotals(a.checkedTotal, a.checkedSampled)
+  })
 
   let loop = () => {
     if (nActions > maxActions) {
@@ -256,9 +305,11 @@ function executeAction(actionOptions) {
       // have completed.
       return
     }
+
     let wait = delay()
     setTimeout(function () {
       a.execute().then(r => {
+        outputTotals(a.checkedTotal, a.checkedSampled)
         nActions += 1
       })
       // set new timer
@@ -267,6 +318,7 @@ function executeAction(actionOptions) {
   }
 
   loop()
+
 }
 
 function delay () {
