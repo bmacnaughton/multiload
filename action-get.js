@@ -16,10 +16,11 @@ class ActionGet extends Action {
   }
 
   execute() {
-    return axios.get(this.url, this.httpOptions).then(r => {
+    return this.httpGet(this.url, this.httpOptions).then(r => {
       this.collectStats(r)
-      this.output(et => this.makeStatsLine(et));
-    });
+      this.output(et => this.makeStatsLine(et))
+      return r
+    })
   }
 
   collectStats(r) {

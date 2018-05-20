@@ -14,12 +14,12 @@ class ActionGetConfig extends Action {
   }
 
   execute() {
-    return axios.get(this.url, this.httpOptions).then(r => {
+    return this.httpGet(this.url, this.httpOptions).then(r => {
       return this.collectStats(r)
     }).then(config => {
       this.output(et => this.makeStatsLine(et, config))
       return config
-    });
+    })
   }
 
   collectStats(r) {

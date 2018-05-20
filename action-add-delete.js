@@ -12,7 +12,6 @@ class ActionAddDelete extends Action {
     this.output = output
     this.url = host + '/api/todos'
     this.httpOptions = options.httpOptions
-    this.inFlight = 0
     this.addCount = 0
     this.addsSampled = 0
     this.delCount = 0
@@ -21,10 +20,6 @@ class ActionAddDelete extends Action {
 
   execute () {
     var f = (et) => this.makeStatsLine(et)
-
-    // rate is per second, so 1 / rate is seconds * 1000
-    // to get ms, * 2 so random should average rate.
-    let interval = 1 / this.options.rate * 2000
 
     return this.addTodo().then(r => {
       this.addCount += 1
@@ -38,7 +33,7 @@ class ActionAddDelete extends Action {
         return Promise.reject('transaction failed')
       }
 
-      return Action.wait(random(interval)).then(() => {
+      return Action.wait(this.delay()).then(() => {
         this.deleteTodo(r.data.todo).then(r => {
           this.delCount += 1
           if (this.wasSampled(r.headers)) this.delsSampled += 1
@@ -53,16 +48,13 @@ class ActionAddDelete extends Action {
   addTodo () {
     let start = Action.mstime()
     let ipso = makePlainText()
-    let req = { title: ipso, completed: false }
-    this.inFlight += 1
-    return axios.post(this.url, req, this.httpOptions).then(r => {
-      this.inFlight -= 1
-      // accumulate time
+    let req = {title: ipso, completed: false}
+
+    return this.httpPost(this.url, req, this.httpOptions).then(r => {
       this.addTime += Action.mstime() - start
       return r
     }).catch(e => {
       console.log(e)
-      this.inFlight -= 1
       return {}
     })
   }
@@ -70,14 +62,12 @@ class ActionAddDelete extends Action {
   // delete a specific ID
   deleteTodo (todo) {
     let start = Action.mstime()
-    this.inFlight += 1
-    return axios.delete(this.url + '/' + todo._id, this.httpOptions).then(r => {
-      this.inFlight -= 1
+
+    return this.httpDelete(this.url + '/' + todo._id, this.httpOptions).then(r => {
       this.delTime += Action.mstime() - start
       return r
     }).catch(e => {
       console.log(e)
-      this.inFlight -= 1
       return {}
     })
   }

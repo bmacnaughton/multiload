@@ -18,11 +18,12 @@ class ActionDelay extends Action{
   }
 
   execute() {
-    var start = Action.mstime();
-    return axios.get(this.url, this.httpOptions).then(r => {
+    let start = Action.mstime()
+    return this.httpGet(this.url, this.httpOptions).then(r => {
       let last = this.collectStats(start, r)
       this.output(et => this.makeStatsLine(et, last))
-    });
+      return r
+    })
   }
 
   collectStats(start, r) {
