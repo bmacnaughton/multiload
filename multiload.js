@@ -3,6 +3,7 @@
 const axios = require('axios')
 const minimist = require('minimist')
 const readline = require('readline')
+const Action = require('./action')
 
 
 const jcu = require('./java-collector-utils')
@@ -12,6 +13,7 @@ const ActionDelay = require('./action-delay')
 const ActionChain = require('./action-chain')
 const ActionGet = require('./action-get')
 const ActionAddDelete = require('./action-add-delete')
+const ActionAdd = require('./action-add')
 
 // internal actions
 const ActionDelete = require('./action-delete')
@@ -31,7 +33,8 @@ const validActions = {
   'ad': ActionAddDelete,
   delay: ActionDelay,
   chain: ActionChain,
-  get: ActionGet
+  get: ActionGet,
+  add: ActionAdd
 }
 
 const cliOptions = [{
@@ -195,12 +198,13 @@ let outputConfig = function (getLine) {
 }
 
 let actionLine
-let outputTotals = function (total, sampled) {
+let outputTotals = function () {
   readline.cursorTo(process.stdout, 0, totalX)
   let et = Math.floor((mstime() - startTime) / 1000) || 1
+  let {checked, sampled} = Action.getAllSampled()
   let line = [
     'et: ', formatTime(et),
-    ', total: ', total, ', sampled: ', sampled,
+    ', total: ', checked, ', sampled: ', sampled,
     '\n'
   ].join('')
   process.stdout.write(line)
@@ -224,12 +228,18 @@ if (badHeader) {
   actionOptions.badHeader = badHeaders[badHeader]
 }
 
+//
 // check action-specific values
+//
 if (action === ActionChain) {
   actionOptions.chain = actionArg
 } else if (action === ActionDelay) {
   actionArg = +actionArg || 1500
   actionOptions.delay = actionArg >= 1 ? actionArg : 1500
+} else if (action === ActionAdd) {
+  // add=max because just adding endlessly creates a problem
+  // in that the application returns all todos when one is added.
+  maxActions = +actionArg || 10
 }
 
 //
@@ -287,7 +297,7 @@ function executeAction(actionOptions) {
   let a = new action(url, outputStats, actionOptions)
   startTime = mstime()
 
-  outputTotals(a.checkedTotal, a.checkedSampled)
+  outputTotals()
 
   debugger
 
@@ -296,20 +306,27 @@ function executeAction(actionOptions) {
   // execute the first one immediately for visual feedback
   // (important if the rate is low.)
   a.execute().then(r => {
-    outputTotals(a.checkedTotal, a.checkedSampled)
+    outputTotals()
   })
 
   let loop = () => {
     if (nActions > maxActions) {
-      // TODO BAM needs to wait while in-flight requests
-      // have completed.
+      // wait in 1/20ths of a second for inflight actions
+      // to clear.
+      // TODO BAM stop after n intervals no matter what?
+      let iid = setInterval(function () {
+        if (a.inFlight === 0) {
+          clearInterval(iid)
+          console.log('\n')
+        }
+      }, 50)
       return
     }
 
     let wait = delay()
     setTimeout(function () {
       a.execute().then(r => {
-        outputTotals(a.checkedTotal, a.checkedSampled)
+        outputTotals()
         nActions += 1
       })
       // set new timer

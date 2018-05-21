@@ -1,5 +1,9 @@
 const axios = require('axios')
 
+// keep totals across all instances
+let allChecked = 0
+let allSampled = 0
+
 class Action {
   constructor (host, output, options) {
     this.host = host
@@ -31,8 +35,10 @@ class Action {
   _common (r) {
     if (this.checkSamples) {
       this.checkedTotal += 1
+      allChecked += 1
       if (this.wasSampled(r.headers)) {
         this.checkedSampled += 1
+        allSampled += 1
       }
     }
   }
@@ -119,6 +125,17 @@ class Action {
       return Promise.resolve()
     }
     return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  static getAllSampled () {
+    return {
+      checked: allChecked,
+      sampled: allSampled
+    }
+  }
+
+  static clearAllSampled () {
+    allChecked = allSampled = 0
   }
 }
 
