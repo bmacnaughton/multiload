@@ -1,4 +1,3 @@
-const axios = require('axios')
 const randomstring = require('randomstring')
 const Action = require('./action')
 
