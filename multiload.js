@@ -94,6 +94,8 @@ let remoteMode = argv['remote-mode']
 
 let action = argv.action
 let maxActions = argv['max-actions']
+
+debugger
 // TODO allow multiple action to be specified
 //if (!Array.isArray(action)) action = [action]
 
@@ -239,7 +241,9 @@ if (action === ActionChain) {
 } else if (action === ActionAdd) {
   // add=max because just adding endlessly creates a problem
   // in that the application returns all todos when one is added.
-  maxActions = +actionArg || 10
+  if (maxActions === Infinity) {
+    maxActions = +actionArg || 10
+  }
 }
 
 //
@@ -310,14 +314,13 @@ function executeAction(actionOptions) {
   })
 
   let loop = () => {
-    if (nActions > maxActions) {
-      // wait in 1/20ths of a second for inflight actions
-      // to clear.
+    if (nActions >= maxActions) {
+      // wait in 1/20ths of a second for inflight actions to complete.
       // TODO BAM stop after n intervals no matter what?
       let iid = setInterval(function () {
         if (a.inFlight === 0) {
           clearInterval(iid)
-          console.log('\n')
+          console.log('\n\n')
         }
       }, 50)
       return
