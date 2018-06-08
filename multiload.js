@@ -40,7 +40,7 @@ const validActions = {
 const cliOptions = [{
   name: 'ws-ip',
   alias: 'w',
-  description: 'webserver[:port] to connect to',
+  description: '[http|https://]webserver[:port] to connect to',
   default: 'http://localhost:8088'
 }, {
   name: 'action',
@@ -101,7 +101,28 @@ debugger
 
 
 let url = argv['ws-ip']
-if (url.indexOf('http://') !== 0) url = 'http://' + url
+let protocol = 'http://'
+let host, port
+
+if (url.indexOf('https://') === 0) {
+  protocol = 'https://'
+  host = url.slice(protocol.length)
+} else if (url.indexOf('http://') === 0) {
+  host = url.slice(protocol.length)
+}
+[host, port] = host.split(':')
+if (!host) {
+  host = 'localhost'
+} else {
+  if (host.endsWith('/')) {
+    host = host.slice(0, -1)
+  }
+}
+if (!port) {
+  port = protocol === 'http://' ? 80 : 443
+}
+
+url = protocol + host + ':' + port
 
 let index = action.indexOf('=')
 let actionArg
@@ -134,6 +155,7 @@ if (!action || argv.h || argv.help) {
   console.log('    -a action, --action=action (default: add-delete)')
   console.log('      where action is:')
   console.log('        add-delete|ad - add a todo then delete it')
+  console.log('        add - add a todo (default max = 10)')
   console.log('        delay[=ms] server delays response for ms (1500 default)')
   console.log('        get - get the todos')
   console.log('        chain[=?query-chain] - chain requests as specified')
@@ -287,6 +309,8 @@ p.then(() => {
   //
   // TODO BAM allow multiple actions, iterate through starting each.
   executeAction(actionOptions)
+}).catch(e => {
+  console.error('Error', e)
 })
 
 
@@ -295,7 +319,6 @@ p.then(() => {
 //
 // this repeatedly executes the action selected
 //
-// TODO BAM consider putting in Action base class.
 var startTime
 function executeAction(actionOptions) {
   let a = new action(url, outputStats, actionOptions)
@@ -326,11 +349,13 @@ function executeAction(actionOptions) {
       return
     }
 
+    // count it before it's hatched, so to speak, so that
+    // the delay can't cause overrunning the target.
+    nActions += 1
     let wait = delay()
     setTimeout(function () {
       a.execute().then(r => {
         outputTotals()
-        nActions += 1
       })
       // set new timer
       loop()
