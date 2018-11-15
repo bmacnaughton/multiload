@@ -28,7 +28,7 @@ class ActionGetConfig extends Action {
     this.agent = r.data.configuration
     config.agent = this.agent
 
-    config.bindings = r.data.bindings ? 'loaded' : 'not loaded'
+    config.bindings = r.data.bindingsVersion
     config.sampleMode = r.data.sampleMode
     config.sampleRate = r.data.sampleRate
     config.pid = r.data.pid
