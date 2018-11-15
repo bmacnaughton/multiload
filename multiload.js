@@ -109,6 +109,8 @@ if (url.indexOf('https://') === 0) {
   host = url.slice(protocol.length)
 } else if (url.indexOf('http://') === 0) {
   host = url.slice(protocol.length)
+} else {
+  host = url
 }
 [host, port] = host.split(':')
 if (!host) {
