@@ -1,23 +1,13 @@
+#!/usr/bin/env node
 'use strict'
 
 const axios = require('axios')
 const minimist = require('minimist')
 const readline = require('readline')
-const Action = require('./action')
+const Action = require('./lib/action')
 
 
-const jcu = require('./java-collector-utils')
-
-// actions
-const ActionDelay = require('./action-delay')
-const ActionChain = require('./action-chain')
-const ActionGet = require('./action-get')
-const ActionAddDelete = require('./action-add-delete')
-const ActionAdd = require('./action-add')
-
-// internal actions
-const ActionDelete = require('./action-delete')
-const ActionGetConfig = require('./action-get-config')
+const jcu = require('./lib/java-collector-utils')
 
 if (!Promise.prototype.finally) {
   console.log('[error] multiload requires Promise.prototype.finally')
@@ -28,13 +18,16 @@ if (!Promise.prototype.finally) {
 
 const env = process.env
 
+const actions = require('./lib/actions')()
+
+// only expose the actions we want exposed.
 const validActions = {
-  'add-delete': ActionAddDelete,
-  'ad': ActionAddDelete,
-  delay: ActionDelay,
-  chain: ActionChain,
-  get: ActionGet,
-  add: ActionAdd
+  'add-delete': 'AddDelete',
+  ad: 'AddDelete',
+  delay: 'Delay',
+  chain: 'Chain',
+  get: 'Get',
+  add: 'Add',
 }
 
 const cliOptions = [{
@@ -144,14 +137,22 @@ if (badHeader && !(badHeader in badHeaders)) {
   badHeader = false
 }
 
+let error = false
+
 if (!(action in validActions)) {
+  error = true
   console.warn('invalid action: "%s"', action)
+}
+
+if (Array.isArray(argv['max-actions'])) {
+  error = true
+  console.warn('more than one max-action value')
 }
 
 // if not good display help then exit.
 action = validActions[action]
 
-if (!action || argv.h || argv.help) {
+if (error || argv.h || argv.help) {
   console.log('usage: node multitest.js options')
   console.log('  options:')
   console.log('    -a action, --action=action (default: add-delete)')
@@ -257,12 +258,12 @@ if (badHeader) {
 //
 // check action-specific values
 //
-if (action === ActionChain) {
+if (action === 'Chain') {
   actionOptions.chain = actionArg
-} else if (action === ActionDelay) {
+} else if (action === 'Delay') {
   actionArg = +actionArg || 1500
   actionOptions.delay = actionArg >= 1 ? actionArg : 1500
-} else if (action === ActionAdd) {
+} else if (action === 'Add') {
   // add=max because just adding endlessly creates a problem
   // in that the application returns all todos when one is added.
   if (maxActions === Infinity) {
@@ -283,7 +284,7 @@ let p
 // Special code to delete existing todos as an option
 //
 if (argv.delete) {
-  let a = new ActionDelete(url, outputStats, actionOptions)
+  let a = new actions.Delete(url, outputStats, actionOptions)
   p = a.execute().then(r => {
 
   }).catch(e => {
@@ -299,7 +300,7 @@ if (argv.delete) {
 p.then(() => {
   readline.cursorTo(process.stdout, 0, 0)
   readline.clearScreenDown(process.stdout)
-  let a = new ActionGetConfig(url, outputConfig, actionOptions)
+  let a = new actions.GetConfig(url, outputConfig, actionOptions)
   return a.execute().then(r => {
 
   }).catch(e => {
@@ -323,7 +324,7 @@ p.then(() => {
 //
 var startTime
 function executeAction(actionOptions) {
-  let a = new action(url, outputStats, actionOptions)
+  let a = new actions[action](url, outputStats, actionOptions)
   startTime = mstime()
 
   outputTotals()
