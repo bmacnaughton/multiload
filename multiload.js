@@ -28,6 +28,7 @@ const validActions = {
   chain: 'Chain',
   get: 'Get',
   add: 'Add',
+  post: 'Post',
 }
 
 const cliOptions = [{
@@ -269,6 +270,8 @@ if (action === 'Chain') {
   if (maxActions === Infinity) {
     maxActions = +actionArg || 10
   }
+} else if (action === 'Post') {
+  actionOptions.url = '/aws/kinesis'
 }
 
 //
