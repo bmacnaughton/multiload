@@ -238,6 +238,12 @@ let outputTotals = function () {
   process.stdout.write(line)
 }
 
+function outputError (e, n = 1) {
+  readline.cursorTo(process.stdout, 0, actionX + n);
+  const line = `? error: ${e.code} ${e.errno}\n`;
+  process.stdout.write(line);
+}
+
 //
 // build options to be passed to action
 //
@@ -307,7 +313,7 @@ p.then(() => {
   return a.execute().then(r => {
 
   }).catch(e => {
-    console.log(e)
+    outputError(e);
   })
 }).then(() => {
   //
@@ -316,7 +322,7 @@ p.then(() => {
   // TODO BAM allow multiple actions, iterate through starting each.
   executeAction(actionOptions)
 }).catch(e => {
-  console.error('Error', e)
+  outputError(e);
 })
 
 
@@ -331,8 +337,6 @@ function executeAction(actionOptions) {
   startTime = mstime()
 
   outputTotals()
-
-  debugger
 
   // count the number executed
   let nActions = 1
@@ -349,7 +353,6 @@ function executeAction(actionOptions) {
       let iid = setInterval(function () {
         if (a.inFlight === 0) {
           clearInterval(iid)
-          console.log('\n\n')
         }
       }, 50)
       return
@@ -360,9 +363,20 @@ function executeAction(actionOptions) {
     nActions += 1
     let wait = delay()
     setTimeout(function () {
-      a.execute().then(r => {
-        outputTotals()
-      })
+      a.execute()
+        .then(r => {
+          if (r instanceof Error) {
+            outputError(r);
+            maxActions = 0;
+            return r;
+          }
+          outputTotals()
+        })
+        .catch(e => {
+          outputError(e);
+          maxActions = 0;
+          return e;
+        })
       // set new timer
       loop()
     }, wait)
