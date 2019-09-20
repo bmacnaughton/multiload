@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 'use strict'
 
-const axios = require('axios')
+/* eslint-disable no-console */
+
 const minimist = require('minimist')
 const readline = require('readline')
 const Action = require('./lib/action')
 
 
-const jcu = require('./lib/java-collector-utils')
+//const jcu = require('./lib/java-collector-utils')
 
 if (!Promise.prototype.finally) {
   console.log('[error] multiload requires Promise.prototype.finally')
@@ -15,8 +16,6 @@ if (!Promise.prototype.finally) {
   console.log('        or node v10')
   process.exit(1)
 }
-
-const env = process.env
 
 const actions = require('./lib/actions')()
 
@@ -67,7 +66,7 @@ const cliOptions = [{
 
 // create a map from an array of objects using key as the prop name
 // and val
-function makeMap(array, key, val) {
+function makeMap (array, key, val) {
   const r = {}
   array.forEach(item => {
     r[item[key]] = item[val]
@@ -82,14 +81,13 @@ const argv = minimist(process.argv.slice(2), {
 })
 
 // params
-let rate = argv.rate
+const rate = argv.rate
 
-let remoteMode = argv['remote-mode']
+//const remoteMode = argv['remote-mode']
 
 let action = argv.action
 let maxActions = argv['max-actions']
 
-debugger
 // TODO allow multiple action to be specified
 //if (!Array.isArray(action)) action = [action]
 
@@ -120,14 +118,14 @@ if (!port) {
 
 url = protocol + host + ':' + port
 
-let index = action.indexOf('=')
+const index = action.indexOf('=')
 let actionArg
 if (~index) {
   actionArg = action.slice(index + 1)
   action = action.slice(0, index)
 }
 
-let badHeaders = {
+const badHeaders = {
   v1: '1BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C',
   v3: '3BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C01'
 }
@@ -163,6 +161,7 @@ if (error || argv.h || argv.help) {
   console.log('        delay[=ms] server delays response for ms (1500 default)')
   console.log('        get - get the todos')
   console.log('        chain[=?query-chain] - chain requests as specified')
+  console.log('        delete-all - delete all todos in the database')
   console.log('')
   console.log('    -r n, --rate=n - number of actions per second (default 1)')
   console.log('    -m n, --max-actions=n - stop after this many actions')
@@ -174,7 +173,7 @@ if (error || argv.h || argv.help) {
 }
 
 
-function formatTime(seconds) {
+function formatTime (seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -185,6 +184,7 @@ function formatTime(seconds) {
   ].filter(a => a).join(':');
 }
 
+/*
 function newlineCount (string) {
   let count = 0
   let lastIndex = -1
@@ -194,43 +194,44 @@ function newlineCount (string) {
   }
   return count
 }
+// */
 
-let configX = 0
-let totalX = 4
-let actionX = 5
+//const configX = 0
+const totalX = 4
+const actionX = 5
 
 let outputStats
-let statsLines
+//let statsLines
 if (process.stdout.isTTY) {
   outputStats = function (getLine) {
-    let et = Math.floor((mstime() - startTime) / 1000) || 1
+    const et = Math.floor((mstime() - startTime) / 1000) || 1
     readline.cursorTo(process.stdout, 0, actionX)
 
-    let line = getLine(et)
+    const line = getLine(et)
     process.stdout.write(line)
     readline.clearLine(process.stdout, 1)
   }
 } else {
   outputStats = function (getLine) {
-    let et = (mstime() - startTime) / 1000
-    let prefix = 'et: ' + formatTime(et) + ' '
+    const et = (mstime() - startTime) / 1000
+    const prefix = 'et: ' + formatTime(et) + ' '
     process.stdout.write(prefix + getLine(et) + '\n')
   }
 }
-let outputConfig = function (getLine) {
-  let et = (mstime() - startTime) / 1000
+const outputConfig = function (getLine) {
+  const et = (mstime() - startTime) / 1000
   process.stdout.write(  '===================\n')
-  let line = getLine(et)
+  const line = getLine(et)
   process.stdout.write(line)
   process.stdout.write('\n===================\n')
 }
 
-let actionLine
-let outputTotals = function () {
+//let actionLine
+const outputTotals = function () {
   readline.cursorTo(process.stdout, 0, totalX)
-  let et = Math.floor((mstime() - startTime) / 1000) || 1
-  let {checked, sampled} = Action.getAllSampled()
-  let line = [
+  const et = Math.floor((mstime() - startTime) / 1000) || 1
+  const {checked, sampled} = Action.getAllSampled()
+  const line = [
     'et: ', formatTime(et),
     ', total: ', checked, ', sampled: ', sampled,
     '\n'
@@ -247,7 +248,7 @@ function outputError (e, n = 1) {
 //
 // build options to be passed to action
 //
-let actionOptions = {
+const actionOptions = {
   httpOptions: {
     headers: {
       'X-Requested-With': 'XMLHttpRequest',
@@ -293,7 +294,7 @@ let p
 // Special code to delete existing todos as an option
 //
 if (argv.delete) {
-  let a = new actions.Delete(url, outputStats, actionOptions)
+  const a = new actions.Delete(url, outputStats, actionOptions)
   p = a.execute().then(r => {
 
   }).catch(e => {
@@ -309,7 +310,7 @@ if (argv.delete) {
 p.then(() => {
   readline.cursorTo(process.stdout, 0, 0)
   readline.clearScreenDown(process.stdout)
-  let a = new actions.GetConfig(url, outputConfig, actionOptions)
+  const a = new actions.GetConfig(url, outputConfig, actionOptions)
   return a.execute().then(r => {
 
   }).catch(e => {
@@ -326,14 +327,12 @@ p.then(() => {
 })
 
 
-
-
 //
 // this repeatedly executes the action selected
 //
-var startTime
-function executeAction(actionOptions) {
-  let a = new actions[action](url, outputStats, actionOptions)
+let startTime
+function executeAction (actionOptions) {
+  const a = new actions[action](url, outputStats, actionOptions)
   startTime = mstime()
 
   outputTotals()
@@ -346,11 +345,11 @@ function executeAction(actionOptions) {
     outputTotals()
   })
 
-  let loop = () => {
+  const loop = () => {
     if (nActions >= maxActions) {
       // wait in 1/20ths of a second for inflight actions to complete.
       // TODO BAM stop after n intervals no matter what?
-      let iid = setInterval(function () {
+      const iid = setInterval(function () {
         if (a.inFlight === 0) {
           clearInterval(iid)
         }
@@ -361,7 +360,7 @@ function executeAction(actionOptions) {
     // count it before it's hatched, so to speak, so that
     // the delay can't cause overrunning the target.
     nActions += 1
-    let wait = delay()
+    const wait = delay()
     setTimeout(function () {
       a.execute()
         .then(r => {
