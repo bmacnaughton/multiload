@@ -3,7 +3,6 @@
 
 /* eslint-disable no-console */
 
-const minimist = require('minimist')
 const readline = require('readline')
 const Action = require('./lib/action')
 
@@ -21,75 +20,31 @@ const actions = require('./lib/actions')()
 
 // only expose the actions we want exposed.
 const validActions = {
+  // todo api actions
   'add-delete': 'AddDelete',
   ad: 'AddDelete',
-  delay: 'Delay',
-  chain: 'Chain',
   get: 'Get',
   add: 'Add',
+  'delete-all': 'DeleteAll',
+  // general actions implemented by todo test server
+  delay: 'Delay',
+  chain: 'Chain',
   post: 'Post',
 }
 
-const cliOptions = [{
-  name: 'ws-ip',
-  alias: 'w',
-  description: '[http|https://]webserver[:port] to connect to',
-  default: 'http://localhost:8088'
-}, {
-  name: 'action',
-  alias: 'a',
-  description: 'action to perform (default: add-delete)',
-  default: 'add-delete'
-}, {
-  name: 'max-actions',
-  alias: 'm',
-  description: 'maximum number of each action to perform',
-  default: Infinity
-}, {
-  name: 'rate',
-  alias: 'r',
-  description: 'number of actions to execute per second',
-  default: 1,
-}, {
-  name: 'bad-header',
-  alias: 'b',
-  description: 'bad header to use, either v1 or v3',
-}, {
-  name: 'remote-mode',
-  description: 'java-collector only setting for remote mode',
-  default: 'always'
-}, {
-  name: 'help',
-  alias: 'h',
-  description: 'this message or --help action for help on that action',
-}]
 
-// create a map from an array of objects using key as the prop name
-// and val
-function makeMap (array, key, val) {
-  const r = {}
-  array.forEach(item => {
-    r[item[key]] = item[val]
-  })
-  return r
-}
-
-const argv = minimist(process.argv.slice(2), {
-  default: makeMap(cliOptions, 'name', 'default'),
-  alias: makeMap(cliOptions, 'alias', 'name'),
-  boolean: cliOptions.filter(i => i.boolean)
-})
+const {argv} = require('./lib/get-cli-options');
 
 // params
 const rate = argv.rate
 
 //const remoteMode = argv['remote-mode']
 
-let action = argv.action
+const action = argv.action
 let maxActions = argv['max-actions']
 
-// TODO allow multiple action to be specified
-//if (!Array.isArray(action)) action = [action]
+// allow multiple actions to be specified
+const cliActions = Array.isArray(action) ? action : [action];
 
 
 let url = argv['ws-ip']
@@ -118,13 +73,6 @@ if (!port) {
 
 url = protocol + host + ':' + port
 
-const index = action.indexOf('=')
-let actionArg
-if (~index) {
-  actionArg = action.slice(index + 1)
-  action = action.slice(0, index)
-}
-
 const badHeaders = {
   v1: '1BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C',
   v3: '3BA76EA380708FB00385D49BBCE13F8F0815B7A4E05F51D0CA1D9A2B7C01'
@@ -136,22 +84,71 @@ if (badHeader && !(badHeader in badHeaders)) {
   badHeader = false
 }
 
-let error = false
+//const configX = 0
+const totalX = 4
+const actionX = 5; // line for the action. must vary by executableAction index.
 
-if (!(action in validActions)) {
-  error = true
-  console.warn('invalid action: "%s"', action)
+let outputStats
+//let statsLines
+
+if (process.stdout.isTTY) {
+  outputStats = function (getLine, actionX) {
+    const et = Math.floor((mstime() - startTime) / 1000) || 1
+    readline.cursorTo(process.stdout, 0, actionX)
+
+    const line = getLine(et)
+    process.stdout.write(line)
+    readline.clearLine(process.stdout, 1)
+  };
+} else {
+  outputStats = function (getLine) {
+    const et = (mstime() - startTime) / 1000
+    const prefix = 'et: ' + formatTime(et) + ' '
+    process.stdout.write(prefix + getLine(et) + '\n')
+  }
+}
+
+
+//
+// validate and accumulate all actions specified on the command line.
+//
+let errors = 0;
+const executableActions = [];
+
+// collect the actions.
+for (let i = 0; i < cliActions.length; i++) {
+  const [action, aRate, aArg] = cliActions[i].split(':');
+  const actionRate =  aRate && +aRate || rate;
+  const actionArg = aArg || '';
+  if (action in validActions) {
+    try {
+      const actionName = validActions[action];
+      const outputLine = actionX + executableActions.length;
+      const outputFn = getLine => outputStats(getLine, outputLine);
+      const a = new actions[actionName](url, outputFn, {rate: actionRate, arg: actionArg});
+      executableActions.push(a);
+    } catch (e) {
+      console.warn(`failed to create action ${action}`, e);
+      errors += 1;
+    }
+  } else {
+    errors += 1;
+    console.warn(`invalid action ${action}`);
+  }
 }
 
 if (Array.isArray(argv['max-actions'])) {
-  error = true
+  errors += 1;
   console.warn('more than one max-action value')
 }
 
 // if not good display help then exit.
-action = validActions[action]
+if (!executableActions.length) {
+  errors += 1;
+  console.warn('no valid actions specified');
+}
 
-if (error || argv.h || argv.help) {
+if (errors || argv.h || argv.help) {
   console.log('usage: node multitest.js options')
   console.log('  options:')
   console.log('    -a action, --action=action (default: add-delete)')
@@ -196,28 +193,6 @@ function newlineCount (string) {
 }
 // */
 
-//const configX = 0
-const totalX = 4
-const actionX = 5
-
-let outputStats
-//let statsLines
-if (process.stdout.isTTY) {
-  outputStats = function (getLine) {
-    const et = Math.floor((mstime() - startTime) / 1000) || 1
-    readline.cursorTo(process.stdout, 0, actionX)
-
-    const line = getLine(et)
-    process.stdout.write(line)
-    readline.clearLine(process.stdout, 1)
-  }
-} else {
-  outputStats = function (getLine) {
-    const et = (mstime() - startTime) / 1000
-    const prefix = 'et: ' + formatTime(et) + ' '
-    process.stdout.write(prefix + getLine(et) + '\n')
-  }
-}
 const outputConfig = function (getLine) {
   const et = (mstime() - startTime) / 1000
   process.stdout.write(  '===================\n')
@@ -263,23 +238,6 @@ if (badHeader) {
   actionOptions.badHeader = badHeaders[badHeader]
 }
 
-//
-// check action-specific values
-//
-if (action === 'Chain') {
-  actionOptions.chain = actionArg
-} else if (action === 'Delay') {
-  actionArg = +actionArg || 1500
-  actionOptions.delay = actionArg >= 1 ? actionArg : 1500
-} else if (action === 'Add') {
-  // add=max because just adding endlessly creates a problem
-  // in that the application returns all todos when one is added.
-  if (maxActions === Infinity) {
-    maxActions = +actionArg || 10
-  }
-} else if (action === 'Post') {
-  actionOptions.url = '/aws/kinesis'
-}
 
 //
 // utility functions
@@ -294,7 +252,7 @@ let p
 // Special code to delete existing todos as an option
 //
 if (argv.delete) {
-  const a = new actions.Delete(url, outputStats, actionOptions)
+  const a = new actions.Delete(url, outputStats.bind(null, actionX), actionOptions)
   p = a.execute().then(r => {
 
   }).catch(e => {
@@ -305,7 +263,7 @@ if (argv.delete) {
 }
 
 //
-// get the configuration data
+// get the configuration data for display on the first output line.
 //
 p.then(() => {
   readline.cursorTo(process.stdout, 0, 0)
@@ -321,7 +279,10 @@ p.then(() => {
   // now execute the action the user selected
   //
   // TODO BAM allow multiple actions, iterate through starting each.
-  executeAction(actionOptions)
+  for (let i = 0; i < executableActions.length; i++) {
+    // actionX is the row offset to use for this action
+    executeAction(executableActions[i])
+  }
 }).catch(e => {
   outputError(e);
 })
@@ -331,8 +292,7 @@ p.then(() => {
 // this repeatedly executes the action selected
 //
 let startTime
-function executeAction (actionOptions) {
-  const a = new actions[action](url, outputStats, actionOptions)
+function executeAction (a, actionX) {
   startTime = mstime()
 
   outputTotals()
