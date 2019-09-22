@@ -123,8 +123,8 @@ for (let i = 0; i < cliActions.length; i++) {
   if (action in validActions) {
     try {
       const actionName = validActions[action];
-      const outputLine = actionX + executableActions.length;
-      const outputFn = getLine => outputStats(getLine, outputLine);
+      const lineXOffset = actionX + executableActions.length;
+      const outputFn = getLine => outputStats(getLine, lineXOffset);
       const a = new actions[actionName](url, outputFn, {rate: actionRate, arg: actionArg});
       executableActions.push(a);
     } catch (e) {
@@ -214,9 +214,9 @@ const outputTotals = function () {
   process.stdout.write(line)
 }
 
-function outputError (e, n = 1) {
+function outputError (e, n = executableActions.length) {
   readline.cursorTo(process.stdout, 0, actionX + n);
-  const line = `? error: ${e.code} ${e.errno}\n`;
+  const line = `? error: ${e}`;
   process.stdout.write(line);
 }
 
@@ -276,7 +276,7 @@ p.then(() => {
   })
 }).then(() => {
   //
-  // now execute the action the user selected
+  // now execute the actions the user selected
   //
   // TODO BAM allow multiple actions, iterate through starting each.
   for (let i = 0; i < executableActions.length; i++) {
@@ -292,7 +292,7 @@ p.then(() => {
 // this repeatedly executes the action selected
 //
 let startTime
-function executeAction (a, actionX) {
+function executeAction (a) {
   startTime = mstime()
 
   outputTotals()
@@ -303,6 +303,8 @@ function executeAction (a, actionX) {
   // (important if the rate is low.)
   a.execute().then(r => {
     outputTotals()
+  }).catch(e => {
+    outputError(e);
   })
 
   const loop = () => {
@@ -318,9 +320,9 @@ function executeAction (a, actionX) {
     }
 
     // count it before it's hatched, so to speak, so that
-    // the delay can't cause overrunning the target.
+    // the delay can't cause overrunning the target rate.
     nActions += 1
-    const wait = delay()
+    const wait = delay(a.rate)
     setTimeout(function () {
       a.execute()
         .then(r => {
@@ -345,7 +347,7 @@ function executeAction (a, actionX) {
 
 }
 
-function delay () {
+function delay (rate) {
   // rate is actions/second => 1/rate is seconds/action
   // seconds/action * 1000 => ms/action
   // ms/action * 2 => yields average action/second ≈≈ rate
