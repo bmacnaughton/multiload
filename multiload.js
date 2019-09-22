@@ -117,7 +117,9 @@ const executableActions = [];
 
 // collect the actions.
 for (let i = 0; i < cliActions.length; i++) {
-  const [action, aRate, aArg] = cliActions[i].split(':');
+  // the argument might have colons in it so make sure that works.
+  const [action, aRate, ...others] = cliActions[i].split(':');
+  const aArg = others.join(':');
   const actionRate =  aRate && +aRate || rate;
   const actionArg = aArg || '';
   if (action in validActions) {
@@ -347,6 +349,10 @@ function executeAction (a) {
 
 }
 
+// get the time to wait.
+// TODO BAM - tweak to adjust the delay slightly based on relationship
+// to specified rate (the target rate). if multiple actions are specified
+// the actual rate can be a bit off of the target rate.
 function delay (rate) {
   // rate is actions/second => 1/rate is seconds/action
   // seconds/action * 1000 => ms/action
