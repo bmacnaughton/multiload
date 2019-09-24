@@ -17,25 +17,10 @@ if (!Promise.prototype.finally) {
 }
 
 const actions = require('./lib/actions')()
-
-// only expose the actions we want exposed.
-const validActions = {
-  // todo api actions
-  'add-delete': 'AddDelete',
-  ad: 'AddDelete',
-  get: 'Get',
-  add: 'Add',
-  'delete-all': 'DeleteAll',
-  // general actions implemented by todo test server
-  delay: 'Delay',
-  chain: 'Chain',
-  post: 'Post',
-}
-
-
 const {argv} = require('./lib/get-cli-options');
 
-// params
+// get global rate. this is used if the action doesn't specify
+// a rate.
 const rate = argv.rate
 
 //const remoteMode = argv['remote-mode']
@@ -109,26 +94,64 @@ if (process.stdout.isTTY) {
 }
 
 
-//
+//===================================================================
 // validate and accumulate all actions specified on the command line.
-//
+//===================================================================
+// only expose the actions we want exposed.
+const validActions = {
+  // todo api actions
+  'add-delete': 'AddDelete',
+  ad: 'AddDelete',
+  get: 'Get',
+  add: 'Add',
+  'delete-all': 'DeleteAll',
+  // general actions implemented by todo test server
+  delay: 'Delay',
+  chain: 'Chain',
+  post: 'Post',
+}
+
+const validActionModifiers = {
+  rate: {parser: rateParser, name: 'rate', default: rate},
+  r: {parser: rateParser, name: 'rate', default: rate},
+  instances: {parser: numberParser, name: 'instances', default: 1},
+  i: {parser: numberParser, name: 'instances', default: 1},
+}
+
+function rateParser (string) {
+  if (string === 'sequential' || string === 'seq') {
+    return 'sequential';
+  }
+  return numberParser(string);
+}
+
+function numberParser (string) {
+  // best way i've seen to implicitly convert a number.
+  const n = string - 0;
+  return (Number.isNaN(n) || n <= 0) ? undefined : n;
+}
+
 let errors = 0;
 const executableActions = [];
 
-// collect the actions.
+//==================================================
+// collect the actions specified on the command line
+//==================================================
 for (let i = 0; i < cliActions.length; i++) {
   // the argument might have colons in it so make sure that works.
-  const [action, aRate, ...others] = cliActions[i].split(':');
+  const [action, params, ...others] = cliActions[i].split(':');
   const aArg = others.join(':');
-  const actionRate =  aRate && +aRate || rate;
-  const actionArg = aArg || '';
+  const modifiers = getActionModifiers(params);
+
   if (action in validActions) {
     try {
       const actionName = validActions[action];
-      const lineXOffset = actionX + executableActions.length;
-      const outputFn = getLine => outputStats(getLine, lineXOffset);
-      const a = new actions[actionName](url, outputFn, {rate: actionRate, arg: actionArg});
-      executableActions.push(a);
+      for (let i = 0; i < modifiers.instances; i++) {
+        const lineXOffset = actionX + executableActions.length;
+        const outputFn = getLine => outputStats(getLine, lineXOffset);
+        const a = new actions[actionName](url, outputFn, {rate: modifiers.rate, arg: aArg});
+        executableActions.push(a);
+      }
     } catch (e) {
       console.warn(`failed to create action ${action}`, e);
       errors += 1;
@@ -139,18 +162,67 @@ for (let i = 0; i < cliActions.length; i++) {
   }
 }
 
+function getActionModifiers (string = '') {
+  const kvs = {rate, instances: 1};
+  // if there's not KV pairs then it's the action-specific rate (for
+  // historical reasons).
+  if (!string) {
+    return kvs;
+  }
+  if (string.indexOf('=') < 0) {
+    let rateValue = rateParser(string);
+    if (rateValue === undefined || rateValue <= 0) {
+      console.warn(`invalid action option: ${string}`);
+      rateValue = rate;
+    }
+    kvs.rate = rateValue;
+    return kvs;
+  }
+
+  // if it's KV pairs then it's the extensible argument mechanism.
+  const pairs = string.split(',');
+  pairs.forEach(p => {
+    let [key, value] = p.split('=').map(s => (s || '').trim());
+    // don't know what was intended so this error is fatal
+    if (!key || !value || !(key in validActionModifiers)) {
+      errors += 1;
+      console.warn('invalid key=value pair', p);
+      return;
+    }
+    let parsedValue = validActionModifiers[key].parser(value);
+
+    // it's a valid key but not a value so default the value.
+    if (parsedValue === undefined) {
+      console.warn(`invalid value ${value} for key ${key}`);
+      parsedValue = validActionModifiers[key].default;
+    }
+
+    kvs[validActionModifiers[key].name] = parsedValue;
+  })
+
+  return kvs
+}
+
+//
+// make sure the semantics are ok.
+//
 if (Array.isArray(argv['max-actions'])) {
   errors += 1;
   console.warn('more than one max-action value')
 }
 
-// if not good display help then exit.
+// if nothing to do let the user know.
 if (!executableActions.length) {
   errors += 1;
   console.warn('no valid actions specified');
 }
 
-if (errors || argv.h || argv.help) {
+// something isn't right.
+if (errors) {
+  process.exit(1);
+}
+
+if (argv.h || argv.help) {
   console.log('usage: node multitest.js options')
   console.log('  options:')
   console.log('    -a action, --action=action (default: add-delete)')
@@ -161,8 +233,12 @@ if (errors || argv.h || argv.help) {
   console.log('        get - get the todos')
   console.log('        chain[=?query-chain] - chain requests as specified')
   console.log('        delete-all - delete all todos in the database')
+  console.log('      each action may have optional components as follows');
+  console.log('        action[:[rate][:[actions-arg]] where rate is the action-specific');
+  console.log('        rate and actions-arg is an action-specific argument interpreted by');
+  console.log('        the action\'s constructor');
   console.log('')
-  console.log('    -r n, --rate=n - number of actions per second (default 1)')
+  console.log('    -rn, --rate=n - number of actions per second (default 1)')
   console.log('    -m n, --max-actions=n - stop after this many actions')
   console.log('    --ws-ip=host[:port] - todo server to connect to')
   console.log('    --delete - delete existing todos before starting')
@@ -291,7 +367,7 @@ p.then(() => {
 
 
 //
-// this repeatedly executes the action selected
+// this repeatedly executes the action specified.
 //
 let startTime
 function executeAction (a) {
@@ -301,8 +377,8 @@ function executeAction (a) {
 
   // count the number executed
   let nActions = 1
-  // execute the first one immediately for visual feedback
-  // (important if the rate is low.)
+  // execute the first one immediately for visual feedback. (important
+  // if the rate is low.)
   a.execute().then(r => {
     outputTotals()
   }).catch(e => {
@@ -311,7 +387,8 @@ function executeAction (a) {
 
   const loop = () => {
     if (nActions >= maxActions) {
-      // wait in 1/20ths of a second for inflight actions to complete.
+      // wait in 1/20ths of a second for inflight actions to complete then
+      // return without initiating any addition actions.
       // TODO BAM stop after n intervals no matter what?
       const iid = setInterval(function () {
         if (a.inFlight === 0) {
@@ -321,12 +398,10 @@ function executeAction (a) {
       return
     }
 
-    // count it before it's hatched, so to speak, so that
-    // the delay can't cause overrunning the target rate.
-    nActions += 1
-    const wait = delay(a.rate)
-    setTimeout(function () {
-      a.execute()
+    // this is the code that is executed no matter what execution
+    // strategy is used.
+    const coreExecution = () => {
+      return a.execute()
         .then(r => {
           if (r instanceof Error) {
             outputError(r);
@@ -340,9 +415,33 @@ function executeAction (a) {
           maxActions = 0;
           return e;
         })
-      // set new timer
-      loop()
-    }, wait)
+    }
+
+    // the execution strategy can be sequential, i.e., start the
+    // next action when the first completes, or it can be a target-rate
+    // using a timer.
+    let executeStrategy;
+    if (a.rate === 'sequential') {
+      executeStrategy = () => {
+        return coreExecution()
+      }
+    } else {
+      executeStrategy = () => {
+        const wait = delay(a)
+        return new Promise(resolve => {
+          setTimeout(function () {
+            coreExecution();
+            resolve();
+          }, wait)
+        })
+      }
+    }
+
+    // count it before it's hatched, so to speak, so that
+    // the delay can't cause overrunning the target rate.
+    nActions += 1
+    executeStrategy().then(loop)
+
   }
 
   loop()
@@ -353,9 +452,9 @@ function executeAction (a) {
 // TODO BAM - tweak to adjust the delay slightly based on relationship
 // to specified rate (the target rate). if multiple actions are specified
 // the actual rate can be a bit off of the target rate.
-function delay (rate) {
+function delay (action) {
   // rate is actions/second => 1/rate is seconds/action
   // seconds/action * 1000 => ms/action
   // ms/action * 2 => yields average action/second ≈≈ rate
-  return Math.random() * 1 / rate * 2000
+  return Math.random() * 1 / action.rate * 2000
 }
