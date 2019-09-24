@@ -148,6 +148,10 @@ for (let i = 0; i < cliActions.length; i++) {
       const actionName = validActions[action];
       for (let i = 0; i < modifiers.instances; i++) {
         const lineXOffset = actionX + executableActions.length;
+        // TODO BAM if instances > 1 invoke actions with "group-id" that
+        // causes the collection of stats for the group. group-head is
+        // the only one that actually outputs. needs more thought. maybe
+        // add static method in action.js that creates N?
         const outputFn = getLine => outputStats(getLine, lineXOffset);
         const a = new actions[actionName](url, outputFn, {rate: modifiers.rate, arg: aArg});
         executableActions.push(a);
