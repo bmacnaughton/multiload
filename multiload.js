@@ -77,19 +77,19 @@ let outputStats
 //let statsLines
 
 if (process.stdout.isTTY) {
-  outputStats = function (getLine, actionX) {
+  outputStats = function (getLine, xOffset, stats) {
     const et = Math.floor((mstime() - startTime) / 1000) || 1
-    readline.cursorTo(process.stdout, 0, actionX)
+    readline.cursorTo(process.stdout, 0, xOffset)
 
-    const line = getLine(et)
+    const line = getLine(et, stats)
     process.stdout.write(line)
     readline.clearLine(process.stdout, 1)
   };
 } else {
-  outputStats = function (getLine) {
+  outputStats = function (getLine, xOffset, stats) {
     const et = (mstime() - startTime) / 1000
     const prefix = 'et: ' + formatTime(et) + ' '
-    process.stdout.write(prefix + getLine(et) + '\n')
+    process.stdout.write(prefix + getLine(et, stats) + '\n')
   }
 }
 
@@ -116,6 +116,8 @@ const validActionModifiers = {
   r: {parser: rateParser, name: 'rate', default: rate},
   instances: {parser: numberParser, name: 'instances', default: 1},
   i: {parser: numberParser, name: 'instances', default: 1},
+  explode: {parser: torfParser, name: 'explode', default: false},
+  e: {parser: torfParser, name: 'explode', default: false},
 }
 
 function rateParser (string) {
@@ -125,14 +127,23 @@ function rateParser (string) {
   return numberParser(string);
 }
 
+// maybe should be called positiveNumberParser...
 function numberParser (string) {
   // best way i've seen to implicitly convert a number.
   const n = string - 0;
   return (Number.isNaN(n) || n <= 0) ? undefined : n;
 }
 
+function torfParser (string) {
+  if (string === 'true' || string === 't' || string === '1') {
+    return true;
+  }
+  return false;
+}
+
 let errors = 0;
 const executableActions = [];
+let statsLineCount = 0;
 
 //==================================================
 // collect the actions specified on the command line
@@ -143,15 +154,28 @@ for (let i = 0; i < cliActions.length; i++) {
   const aArg = others.join(':');
   const modifiers = getActionModifiers(params);
 
-  if (action in validActions) {
+  if (!(action in validActions)) {
+    errors += 1;
+    console.warn(`invalid action ${action}`);
+    continue;
+  }
+  const actionName = validActions[action];
+
+  if (modifiers.instances === 1 || modifiers.explode) {
+    // then each instance gets it's own line of output.
     try {
-      const actionName = validActions[action];
       for (let i = 0; i < modifiers.instances; i++) {
-        const lineXOffset = actionX + executableActions.length;
+        const lineXOffset = actionX + statsLineCount++;
         // TODO BAM if instances > 1 invoke actions with "group-id" that
         // causes the collection of stats for the group. group-head is
         // the only one that actually outputs. needs more thought. maybe
         // add static method in action.js that creates N?
+        // outputFn is either
+        //    1) existing function but calls formatStatsLine with stats
+        //    2) new aggregateStats function that collects stats across instances
+        // this method works for all as long as 1) instances are called to add their
+        // stats to the aggregated stats for each iteration of output and 2) the final
+        // instance actually generates the output.
         const outputFn = getLine => outputStats(getLine, lineXOffset);
         const a = new actions[actionName](url, outputFn, {rate: modifiers.rate, arg: aArg});
         executableActions.push(a);
@@ -161,14 +185,39 @@ for (let i = 0; i < cliActions.length; i++) {
       errors += 1;
     }
   } else {
-    errors += 1;
-    console.warn(`invalid action ${action}`);
+    try {
+      const lineXOffset = actionX + statsLineCount++;
+      const group = [];
+      const outputFn = getLine => {
+        // aggregate the stats at this time from each instance in the group
+        const stats = group[0].getStats();
+        for(let i = 1; i < group.length; i++) {
+          const s = group[i].getStats();
+          Object.keys(stats).forEach(stat => {
+            stats[stat] += s[stat];
+          })
+        }
+        outputStats(getLine, lineXOffset, stats);
+      }
+
+      // the first instance collects and outputs while all the others noop
+      for (let i = 0; i < modifiers.instances; i++) {
+        const fn = i ? function () {} : outputFn;
+        const a = new actions[actionName](url, fn, {rate: modifiers.rate, arg: aArg});
+        group.push(a);
+        executableActions.push(a);
+      }
+    } catch (e) {
+      console.warn(`failed to create action ${actions}`, e);
+      errors += 1;
+    }
   }
+
 }
 
 function getActionModifiers (string = '') {
   const kvs = {rate, instances: 1};
-  // if there's not KV pairs then it's the action-specific rate (for
+  // if there're not KV pairs then it's the action-specific rate (for
   // historical reasons).
   if (!string) {
     return kvs;
@@ -190,7 +239,7 @@ function getActionModifiers (string = '') {
     // don't know what was intended so this error is fatal
     if (!key || !value || !(key in validActionModifiers)) {
       errors += 1;
-      console.warn('invalid key=value pair', p);
+      console.error('invalid key=value pair', p);
       return;
     }
     let parsedValue = validActionModifiers[key].parser(value);
@@ -238,11 +287,12 @@ if (argv.h || argv.help) {
   console.log('        chain[=?query-chain] - chain requests as specified')
   console.log('        delete-all - delete all todos in the database')
   console.log('      each action may have optional components as follows');
-  console.log('        action[:[rate][:[actions-arg]] where rate is the action-specific');
-  console.log('        rate and actions-arg is an action-specific argument interpreted by');
-  console.log('        the action\'s constructor');
+  console.log('        action[:[rate][:[actions-arg]] where rate is an action-specific');
+  console.log('        rate or a set of KV pairs with valid keys being "rate" and "instances"')
+  console.log('        actions-arg is an action-specific argument interpreted by the action\'s');
+  console.log('        constructor');
   console.log('')
-  console.log('    -rn, --rate=n - number of actions per second (default 1)')
+  console.log('    -rn, --rate=n - number of actions per second (default 1) or "seq"')
   console.log('    -m n, --max-actions=n - stop after this many actions')
   console.log('    --ws-ip=host[:port] - todo server to connect to')
   console.log('    --delete - delete existing todos before starting')
@@ -298,7 +348,7 @@ const outputTotals = function () {
 
 function outputError (e, n = executableActions.length) {
   readline.cursorTo(process.stdout, 0, actionX + n);
-  const line = `? error: ${e}`;
+  const line = `? error: ${e}\n${e.stack}`;
   process.stdout.write(line);
 }
 
@@ -352,7 +402,7 @@ p.then(() => {
   readline.clearScreenDown(process.stdout)
   const a = new actions.GetConfig(url, outputConfig, actionOptions)
   return a.execute().then(r => {
-
+    // do nothing
   }).catch(e => {
     outputError(e);
   })
@@ -360,9 +410,7 @@ p.then(() => {
   //
   // now execute the actions the user selected
   //
-  // TODO BAM allow multiple actions, iterate through starting each.
   for (let i = 0; i < executableActions.length; i++) {
-    // actionX is the row offset to use for this action
     executeAction(executableActions[i])
   }
 }).catch(e => {
@@ -440,16 +488,13 @@ function executeAction (a) {
         })
       }
     }
-
     // count it before it's hatched, so to speak, so that
     // the delay can't cause overrunning the target rate.
     nActions += 1
     executeStrategy().then(loop)
-
   }
 
   loop()
-
 }
 
 // get the time to wait.
