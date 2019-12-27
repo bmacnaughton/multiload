@@ -19,6 +19,16 @@ if (!Promise.prototype.finally) {
 const actions = require('./lib/actions')()
 const {argv} = require('./lib/get-cli-options');
 
+// for use with get-cli-options-2
+//const getOptions = require('./lib/get-cli-options');
+//
+//const {cliOptions, showHelp, error} = getOptions({configFile: {key: 'c', alias: 'config-file'}});
+//
+//if (cliOptions.help || cliOptions._.length !== 1) {
+//  showHelp();
+//  return;
+//}
+
 // get global rate. this is used if the action doesn't specify
 // a rate.
 const rate = argv.rate
@@ -147,6 +157,25 @@ let statsLineCount = 0;
 
 //==================================================
 // collect the actions specified on the command line
+// and is defined as:
+//
+// <action-option> ::= <action-specifier><separator><action-definition>
+// <action-specifier> ::= "-a" | "--action"
+// <separator> ::= "=" | " "
+// <action-definition> ::= <action-name><action-parameters>
+// <action-name> ::= "ad" | "add-delete" | "add" | "delay" | "get" | "chain" | "delete-all"
+// <action-parameters> ::= "" | ":" <settings>
+// <settings> ::= <action-specific-settings> | <action-specific-settings ":" <action-args>
+//
+// <action-specific-settings> ::= <rate> | <key-value-settings>
+// <rate> ::= <number>
+// <key-value-settings> ::= <common-key-value> ["," <key-value-settings>]
+// <common-key-value> ::= <rate-key-value> | <instance-key-value>
+// <rate-key-value> ::= ("rate" | "r") "=" (<number> | "seq" | "sequential")
+// <instance-key-value> ::= ("instance" | "i") "=" <number>
+//
+// <action-args> ::= <action-specific-string>
+//
 //==================================================
 for (let i = 0; i < cliActions.length; i++) {
   // the argument might have colons in it so make sure that works.
@@ -191,7 +220,7 @@ for (let i = 0; i < cliActions.length; i++) {
       const outputFn = getLine => {
         // aggregate the stats at this time from each instance in the group
         const stats = group[0].getStats();
-        for(let i = 1; i < group.length; i++) {
+        for (let i = 1; i < group.length; i++) {
           const s = group[i].getStats();
           Object.keys(stats).forEach(stat => {
             stats[stat] += s[stat];
@@ -235,7 +264,7 @@ function getActionModifiers (string = '') {
   // if it's KV pairs then it's the extensible argument mechanism.
   const pairs = string.split(',');
   pairs.forEach(p => {
-    let [key, value] = p.split('=').map(s => (s || '').trim());
+    const [key, value] = p.split('=').map(s => (s || '').trim());
     // don't know what was intended so this error is fatal
     if (!key || !value || !(key in validActionModifiers)) {
       errors += 1;
@@ -275,29 +304,62 @@ if (errors) {
   process.exit(1);
 }
 
-if (argv.h || argv.help) {
-  console.log('usage: node multitest.js options')
+if (argv.h || argv.help || argv.H) {
+  console.log('usage: node multiload.js options')
   console.log('  options:')
   console.log('    -a action, --action=action (default: add-delete)')
-  console.log('      where action is:')
+  console.log('      where each action can be:')
   console.log('        add-delete|ad - add a todo then delete it')
   console.log('        add - add a todo (default max = 10)')
-  console.log('        delay[=ms] server delays response for ms (1500 default)')
+  console.log('        delay::1500 server delays response for ms (1500 default)');
   console.log('        get - get the todos')
-  console.log('        chain[=?query-chain] - chain requests as specified')
+  console.log('        chain::query-chain] - chain the specified requests');
   console.log('        delete-all - delete all todos in the database')
-  console.log('      each action may have optional components as follows');
-  console.log('        action[:[rate][:[actions-arg]] where rate is an action-specific');
-  console.log('        rate or a set of KV pairs with valid keys being "rate" and "instances"')
-  console.log('        actions-arg is an action-specific argument interpreted by the action\'s');
-  console.log('        constructor');
-  console.log('')
+  console.log();
+  console.log('      each action may have optional modifiers (use -H help for examples):');
+  console.log('        action[:[rate][:[actions-arg]]');
+  console.log('          - rate is an action-specific rate or one or more KV pairs of "rate",');
+  console.log('          "instances", and "explode"');
+  console.log('          - action-args are action-specific and are interpreted by the');
+  console.log('          action\'s constructor');
+  console.log();
   console.log('    -rn, --rate=n - number of actions per second (default 1) or "seq"')
   console.log('    -m n, --max-actions=n - stop after this many actions')
   console.log('    --ws-ip=host[:port] - todo server to connect to')
   console.log('    --delete - delete existing todos before starting')
   console.log('    -b, --bad-header - v1 or v3, sends bad header instead of good')
-  console.log()
+  console.log('    -H - help with examples');
+  console.log();
+  if (!argv.H) {
+    process.exit(0);
+  }
+  console.log('examples:');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088');
+  console.log('  executes the add-delete action at the default rate');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a delay::1000');
+  console.log('  executes the delay action with a 1 second delay')
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a delay:20:1500');
+  console.log('  executes 20 delays/second with each delay 1.5 seconds');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a delay:20:1500 -a ad:5');
+  console.log('  executes 20 delays/second and 5 add-delete-pairs/second');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a delay:r=10,i=3:1250');
+  console.log('  executes 3 instance of delays each executing 10 1.25-second delays per second');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a delay:r=10,i=3,e=t:1250');
+  console.log('  the same as the previous example except each instance is on a separate line');
+  console.log('  while before the 3 instances were combined into one line.');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a ad:seq');
+  console.log('  execute the add-delete-pairs sequentially, i.e., wait for each to complete');
+  console.log('  before starting the next one. this rate is determined by the round-trip time');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a ad:rate=seq,instances=2,explode=1');
+  console.log('  the same as the previous example but with two instances, one per output line');
   process.exit(0)
 }
 
