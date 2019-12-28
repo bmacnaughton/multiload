@@ -126,8 +126,8 @@ const validActionModifiers = {
   r: {parser: rateParser, name: 'rate', default: rate},
   instances: {parser: numberParser, name: 'instances', default: 1},
   i: {parser: numberParser, name: 'instances', default: 1},
-  explode: {parser: torfParser, name: 'explode', default: false},
-  e: {parser: torfParser, name: 'explode', default: false},
+  explode: {parser: torfParser, name: 'explode', default: false, singleton: true},
+  e: {parser: torfParser, name: 'explode', default: false, singleton: true},
 }
 
 function rateParser (string) {
@@ -265,13 +265,26 @@ function getActionModifiers (string = '') {
   const pairs = string.split(',');
   pairs.forEach(p => {
     const [key, value] = p.split('=').map(s => (s || '').trim());
-    // don't know what was intended so this error is fatal
-    if (!key || !value || !(key in validActionModifiers)) {
+
+    // check the keys
+    if (!key || !(key in validActionModifiers)) {
       errors += 1;
-      console.error('invalid key=value pair', p);
+      console.error(`invalid key ${key}`);
       return;
     }
-    let parsedValue = validActionModifiers[key].parser(value);
+    let parsedValue;
+    // singletons don't require a value
+    if (!value) {
+      if ('singleton' in validActionModifiers[key]) {
+        parsedValue = validActionModifiers[key].singleton;
+      } else {
+        errors += 1;
+        console.log(`${key} requires a value`);
+        return;
+      }
+    } else {
+      parsedValue = validActionModifiers[key].parser(value);
+    }
 
     // it's a valid key but not a value so default the value.
     if (parsedValue === undefined) {
@@ -350,7 +363,7 @@ if (argv.h || argv.help || argv.H) {
   console.log('./multiload --ws-ip=localhost:8088 -a delay:r=10,i=3:1250');
   console.log('  executes 3 instance of delays each executing 10 1.25-second delays per second');
   console.log();
-  console.log('./multiload --ws-ip=localhost:8088 -a delay:r=10,i=3,e=t:1250');
+  console.log('./multiload --ws-ip=localhost:8088 -a delay:r=10,i=3,e:1250');
   console.log('  the same as the previous example except each instance is on a separate line');
   console.log('  while before the 3 instances were combined into one line.');
   console.log();
@@ -358,7 +371,7 @@ if (argv.h || argv.help || argv.H) {
   console.log('  execute the add-delete-pairs sequentially, i.e., wait for each to complete');
   console.log('  before starting the next one. this rate is determined by the round-trip time');
   console.log();
-  console.log('./multiload --ws-ip=localhost:8088 -a ad:rate=seq,instances=2,explode=1');
+  console.log('./multiload --ws-ip=localhost:8088 -a ad:rate=seq,instances=2,explode');
   console.log('  the same as the previous example but with two instances, one per output line');
   process.exit(0)
 }
