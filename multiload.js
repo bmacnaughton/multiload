@@ -373,6 +373,11 @@ if (argv.h || argv.help || argv.H) {
   console.log();
   console.log('./multiload --ws-ip=localhost:8088 -a ad:rate=seq,instances=2,explode');
   console.log('  the same as the previous example but with two instances, one per output line');
+  console.log();
+  console.log('./multiload --ws-ip=localhost:8088 -a chain::?target=https://google.com');
+  console.log('  execute an outbound request to google.com with the default rate');
+  console.log('  the chain argument can be chained, e.g.,');
+  console.log('  ?http://localhost:8088/chain?target=https://google.com');
   process.exit(0)
 }
 
