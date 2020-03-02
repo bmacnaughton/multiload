@@ -35,10 +35,18 @@ const rate = argv.rate
 
 //const remoteMode = argv['remote-mode']
 
-const action = argv.action
-let maxActions = argv['max-actions']
+// only one default max-actions can be specified.
+if (Array.isArray(argv['max-actions'])) {
+  errors += 1;
+  console.error('more than one max-action value');
+}
+// set a global default. this will be an array if multiple
+// were specified but an error has already been set so this
+// will process.exit(1) later.
+const maxActions = argv['max-actions'];
 
 // allow multiple actions to be specified
+const action = argv.action
 const cliActions = Array.isArray(action) ? action : [action];
 
 
@@ -128,6 +136,8 @@ const validActionModifiers = {
   i: {parser: numberParser, name: 'instances', default: 1},
   explode: {parser: torfParser, name: 'explode', default: false, singleton: true},
   e: {parser: torfParser, name: 'explode', default: false, singleton: true},
+  max: {parser: numberParser, name: 'maximum', default: Infinity},
+  m: {parser: numberParser, name: 'maximum', default:Infinity},
 }
 
 function rateParser (string) {
@@ -189,6 +199,7 @@ for (let i = 0; i < cliActions.length; i++) {
     continue;
   }
   const actionName = validActions[action];
+  const actionMods = {rate: modifiers.rate, maximum: modifiers.maximum, arg: aArg};
 
   if (modifiers.instances === 1 || modifiers.explode) {
     // then each instance gets it's own line of output.
@@ -206,7 +217,7 @@ for (let i = 0; i < cliActions.length; i++) {
         // stats to the aggregated stats for each iteration of output and 2) the final
         // instance actually generates the output.
         const outputFn = getLine => outputStats(getLine, lineXOffset);
-        const a = new actions[actionName](url, outputFn, {rate: modifiers.rate, arg: aArg});
+        const a = new actions[actionName](url, outputFn, actionMods);
         executableActions.push(a);
       }
     } catch (e) {
@@ -232,7 +243,7 @@ for (let i = 0; i < cliActions.length; i++) {
       // the first instance collects and outputs while all the others noop
       for (let i = 0; i < modifiers.instances; i++) {
         const fn = i ? function () {} : outputFn;
-        const a = new actions[actionName](url, fn, {rate: modifiers.rate, arg: aArg});
+        const a = new actions[actionName](url, fn, actionMods);
         group.push(a);
         executableActions.push(a);
       }
@@ -244,6 +255,10 @@ for (let i = 0; i < cliActions.length; i++) {
 
 }
 
+//
+// decode the action-modifiers in an action definition:
+// "action-name:action-modifiers:actions-arg"
+//
 function getActionModifiers (string = '') {
   const kvs = {rate, instances: 1};
   // if there're not KV pairs then it's the action-specific rate (for
@@ -301,10 +316,7 @@ function getActionModifiers (string = '') {
 //
 // make sure the semantics are ok.
 //
-if (Array.isArray(argv['max-actions'])) {
-  errors += 1;
-  console.warn('more than one max-action value')
-}
+
 
 // if nothing to do let the user know.
 if (!executableActions.length) {
@@ -332,7 +344,7 @@ if (argv.h || argv.help || argv.H) {
   console.log('      each action may have optional modifiers (use -H help for examples):');
   console.log('        action[:[rate][:[actions-arg]]');
   console.log('          - rate is an action-specific rate or one or more KV pairs of "rate",');
-  console.log('          "instances", and "explode"');
+  console.log('          "instances", "max", and "explode"');
   console.log('          - action-args are action-specific and are interpreted by the');
   console.log('          action\'s constructor');
   console.log();
@@ -505,6 +517,8 @@ let startTime
 function executeAction (a) {
   startTime = mstime()
 
+  if (!a.maxActions) a.maxActions = maxActions;
+
   outputTotals()
 
   // count the number executed
@@ -518,7 +532,7 @@ function executeAction (a) {
   })
 
   const loop = () => {
-    if (nActions >= maxActions) {
+    if (nActions >= a.maxActions) {
       // wait in 1/20ths of a second for inflight actions to complete then
       // return without initiating any addition actions.
       // TODO BAM stop after n intervals no matter what?
@@ -537,14 +551,14 @@ function executeAction (a) {
         .then(r => {
           if (r instanceof Error) {
             outputError(r);
-            maxActions = 0;
+            a.maxActions = 0;
             return r;
           }
           outputTotals()
         })
         .catch(e => {
           outputError(e);
-          maxActions = 0;
+          a.maxActions = 0;
           return e;
         })
     }
@@ -570,7 +584,9 @@ function executeAction (a) {
     }
     // count it before it's hatched, so to speak, so that
     // the delay can't cause overrunning the target rate.
-    nActions += 1
+    nActions += 1;
+
+    // this counts on tail recursion being optimized away
     executeStrategy().then(loop)
   }
 
