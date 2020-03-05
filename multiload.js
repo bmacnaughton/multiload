@@ -127,6 +127,8 @@ const validActions = {
   delay: 'Delay',
   chain: 'Chain',
   post: 'Post',
+  // general action independent of server
+  'get-endpoint': 'GetEndpoint',
 }
 
 const validActionModifiers = {
@@ -490,6 +492,9 @@ if (argv.delete) {
 // get the configuration data for display on the first output line.
 //
 p.then(() => {
+  if (argv['no-config']) {
+    return;
+  }
   readline.cursorTo(process.stdout, 0, 0)
   readline.clearScreenDown(process.stdout)
   const a = new actions.GetConfig(url, outputConfig, actionOptions)
