@@ -492,15 +492,18 @@ if (argv.delete) {
 // get the configuration data for display on the first output line.
 //
 p.then(() => {
-  if (argv['no-config']) {
-    return;
-  }
   readline.cursorTo(process.stdout, 0, 0)
   readline.clearScreenDown(process.stdout)
   const a = new actions.GetConfig(url, outputConfig, actionOptions)
   return a.execute().then(r => {
     // do nothing
   }).catch(e => {
+    if (argv['no-config']) {
+      process.stdout.write('==========================\n');
+      process.stdout.write('no configuration available\n');
+      process.stdout.write('==========================\n');
+      return;
+    }
     outputError(e);
   })
 }).then(() => {
