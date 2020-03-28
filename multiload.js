@@ -138,8 +138,8 @@ const validActionModifiers = {
   i: {parser: numberParser, name: 'instances', default: 1},
   explode: {parser: torfParser, name: 'explode', default: false, singleton: true},
   e: {parser: torfParser, name: 'explode', default: false, singleton: true},
-  max: {parser: numberParser, name: 'maximum', default: Infinity},
-  m: {parser: numberParser, name: 'maximum', default:Infinity},
+  max: {parser: numberParser, name: 'maximum', default: maxActions},
+  m: {parser: numberParser, name: 'maximum', default: maxActions},
 }
 
 function rateParser (string) {
@@ -201,7 +201,11 @@ for (let i = 0; i < cliActions.length; i++) {
     continue;
   }
   const actionName = validActions[action];
-  const actionMods = {rate: modifiers.rate, maximum: modifiers.maximum, arg: aArg};
+  const actionMods = {
+    rate: modifiers.rate,
+    maximum: modifiers.maximum || maxActions,
+    arg: aArg
+  };
 
   if (modifiers.instances === 1 || modifiers.explode) {
     // then each instance gets it's own line of output.
@@ -471,7 +475,7 @@ if (badHeader) {
 // mstime, wait, random need to become base class of
 // action classes
 //
-const mstime = () => new Date().getTime()
+const mstime = () => Date.now();
 
 let p
 //
@@ -507,6 +511,15 @@ p.then(() => {
     outputError(e);
   })
 }).then(() => {
+  // here for debugging output of actions
+  return;
+  /* eslint-disable */
+  for (let i = 0; i < executableActions.length; i++) {
+    console.log(executableActions[i]);
+  }
+  process.exit(0);
+  /* eslint-enable */
+}).then(() => {
   //
   // now execute the actions the user selected
   //
@@ -524,8 +537,6 @@ p.then(() => {
 let startTime
 function executeAction (a) {
   startTime = mstime()
-
-  if (!a.maxActions) a.maxActions = maxActions;
 
   outputTotals()
 
