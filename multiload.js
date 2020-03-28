@@ -396,6 +396,11 @@ if (argv.h || argv.help || argv.H) {
   console.log('  execute an outbound request to google.com with the default rate');
   console.log('  the chain argument can be chained, e.g.,');
   console.log('  ?http://localhost:8088/chain?target=https://google.com');
+  console.log();
+  console.log('./multiload.js --ws-ip=localhost:8088 -a add:rate=5 -a delete-all:rate=0.25,max=3 -a get:rate=1 -a delay:rate=4:0 -m 10');
+  console.log('  add 5 todos/sec, delete all todos every 4 seconds, get all todos once/second,');
+  console.log('  execute a 4 0-ms delays/second. each is executed a maximum of 10 times except');
+  console.log('  for delete-all which has an action-specific maximum of 3');
   process.exit(0)
 }
 
