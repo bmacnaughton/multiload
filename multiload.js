@@ -3,9 +3,10 @@
 
 /* eslint-disable no-console */
 
+const os = require('os');
 const readline = require('readline')
 const Action = require('./lib/action')
-
+const Annotations = require('./lib/annotations');
 
 //const jcu = require('./lib/java-collector-utils')
 
@@ -399,7 +400,7 @@ if (argv.h || argv.help || argv.H) {
   console.log();
   console.log('./multiload.js --ws-ip=localhost:8088 -a add:rate=5 -a delete-all:rate=0.25,max=3 -a get:rate=1 -a delay:rate=4:0 -m 10');
   console.log('  add 5 todos/sec, delete all todos every 4 seconds, get all todos once/second,');
-  console.log('  execute a 4 0-ms delays/second. each is executed a maximum of 10 times except');
+  console.log('  execute 4 0-ms delays/second. each is executed a maximum of 10 times except');
   console.log('  for delete-all which has an action-specific maximum of 3');
   process.exit(0)
 }
@@ -415,6 +416,8 @@ function formatTime (seconds) {
     s > 9 ? s : '0' + s,
   ].filter(a => a).join(':');
 }
+
+const serviceKey = argv['service-key'];
 
 /*
 function newlineCount (string) {
@@ -525,6 +528,39 @@ p.then(() => {
   process.exit(0);
   /* eslint-enable */
 }).then(() => {
+  // if there isn't a service key pretend it worked.
+  if (!serviceKey) {
+    return {statusCode: 200};
+  }
+  // setup annotations as well
+  const annotationsOpts = {'host': argv['annotation-server']};
+  const annotations = new Annotations(serviceKey, annotationsOpts);
+  const opts = {source: os.hostname()};
+  let [title, stream, desc] = argv['annotation-opts'].split(':');
+  if (!stream) stream = 'multiload';
+  if (!title) {
+    const actions = argv.action.join(' ');
+    title = `actions: ${actions} default rate: ${argv.rate}`;
+  }
+  if (desc) {
+    // do this silly thing so eslint doesn't complain that desc
+    // is constant.
+    desc = opts.description = desc;
+  }
+  return annotations.send(stream, title, opts);
+}).then(result => {
+  if (result.statusCode < 200 || result.statusCode >= 300) {
+    // eslint-disable-next-line no-console
+    console.log(result);
+    // wait 5 seconds so the error can be seen because failure to
+    // send annotation isn't considered fatal.
+    return new Promise(resolve => {
+      setTimeout(function () {
+        resolve();
+      }, 5000);
+    });
+  }
+}).then(() => {
   //
   // now execute the actions the user selected
   //
@@ -581,6 +617,12 @@ function executeAction (a) {
           outputTotals()
         })
         .catch(e => {
+          // debugger statement just flags the line as an eslint error to
+          // remind need to handle various errors best
+          // (probably in action.js).
+          // e.g. Error: read ECONNRESET
+          // at TCP.onStreamRead(internal/stream_base_commons.js: 205:27)
+          debugger
           outputError(e);
           a.maxActions = 0;
           return e;
