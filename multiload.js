@@ -128,6 +128,7 @@ const validActions = {
   delay: 'Delay',
   chain: 'Chain',
   post: 'Post',
+  error: 'HttpError',
   // general action independent of server
   'get-endpoint': 'GetEndpoint',
 }
