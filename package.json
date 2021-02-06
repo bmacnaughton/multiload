@@ -16,8 +16,8 @@
   "author": "Bruce A. MacNaughton",
   "license": "ISC",
   "dependencies": {
-    "axios": "^0.19.2",
-    "minimist": "^1.2.0",
+    "axios": "^0.21.1",
+    "minimist": "^1.2.5",
     "randomstring": "^1.1.5"
   }
 }
