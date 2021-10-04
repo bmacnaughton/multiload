@@ -420,17 +420,6 @@ function formatTime (seconds) {
 
 const serviceKey = argv['service-key'];
 
-/*
-function newlineCount (string) {
-  let count = 0
-  let lastIndex = -1
-
-  while (~(lastIndex = string.indexOf('\n', lastIndex + 1))) {
-    count += 1
-  }
-  return count
-}
-// */
 
 const outputConfig = function (getLine) {
   const et = (mstime() - startTime) / 1000
